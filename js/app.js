@@ -19,6 +19,9 @@ const pct = m => (Math.min(Math.max(m, H0), H1) - H0) / (H1 - H0) * 100;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const onDay = k => state.entries.filter(e => e.date === k).sort(byStart);
 
+// A finished client session waits for payment until it is marked paid.
+const payable = e => e.cat === 'client' && e.status !== 'cancelled' && liveStatus(e) === 'done';
+
 // ---------- items ----------
 function itemHTML(e, compact = false) {
   const st = liveStatus(e);
@@ -31,7 +34,7 @@ function itemHTML(e, compact = false) {
   return `<button class="item ${st} ${compact ? 'compact' : ''} ${e.id === state.lastNew ? 'new' : ''}" data-id="${e.id}">
     <i class="dot" style="background:var(--c-${e.cat})"></i>
     <span class="time">${fmtTime(e.start)}<small>${fmtTime(e.end)}</small></span>
-    <span class="txt"><span class="title">${esc(e.title)}</span>${compact ? '' : `<span class="sub">${CATS[e.cat]}</span>`}</span>${compact ? '' : right}</button>`;
+    <span class="txt"><span class="title">${esc(e.title)}</span>${compact ? '' : `<span class="sub">${CATS[e.cat]}</span>`}</span>${compact ? '' : right}${!compact && payable(e) ? (e.paidAt ? '<span class="paid">پرداخت ثبت شد</span>' : `<span class="pay" data-pay="${e.id}" role="button">پرداخت شد؟</span>`) : ''}</button>`;
 }
 
 // ---------- screens ----------
@@ -91,8 +94,22 @@ function week() {
 }
 
 function clients() {
-  return `<div class="head"><div><div class="eyebrow">دوره‌ها و جلسه‌ها</div><h1 class="big">مراجع‌ها</h1></div></div>
-    <div class="card empty"><b>به‌زودی</b>شمارش خودکار جلسه‌ها، تعداد نفرات و هشدار تمدید در مرحله‌ی ۴ اینجا میاد.</div>`;
+  const now = new Date(), j = jMonthYear(now);
+  const done = state.entries.filter(e => payable(e) && jMonthYear(fromDayKey(e.date)) === j);
+  const waitingAll = state.entries.filter(e => payable(e) && !e.paidAt);
+  const by = new Map();
+  for (const e of done) { const r = by.get(e.title) || { title: e.title, n: 0, unpaid: [] }; r.n++; if (!e.paidAt) r.unpaid.push(e); by.set(e.title, r); }
+  const rows = [...by.values()].sort((a, b) => b.unpaid.length - a.unpaid.length || b.n - a.n);
+  const head = `<div class="head"><div><div class="eyebrow">${j}</div><h1 class="big">مراجع‌ها</h1></div>
+    <div class="eyebrow" style="text-align:left">${faDigits(done.length)} جلسه برگزار شد<br>${waitingAll.length ? `<span style="color:var(--burg)">${faDigits(waitingAll.length)} منتظر پرداخت</span>` : 'همه پرداخت شده'}</div></div>`;
+  if (!rows.length && !waitingAll.length) return head + `<div class="card empty"><b>هنوز جلسه‌ای تموم نشده</b>جلسه‌هایی که با دسته‌ی «مراجع» ثبت کنی و تموم بشن، این‌جا با وضعیت پرداخت میان.</div>`;
+  const old = waitingAll.filter(e => jMonthYear(fromDayKey(e.date)) !== j);
+  return head + `<div class="list stagger">${rows.map(r => `<div class="card crow">
+      <div><b>${esc(r.title)}</b><div class="eyebrow">${faDigits(r.n)} جلسه این ماه${r.unpaid.length ? `، <span style="color:var(--burg)">${faDigits(r.unpaid.length)} پرداخت‌نشده</span>` : '، تسویه'}</div></div>
+      ${r.unpaid.length ? `<button class="pay" data-pay="${r.unpaid[0].id}">پرداخت شد</button>` : '<span class="paid">✓</span>'}</div>`).join('')}
+    ${old.length ? `<div class="eyebrow" style="margin:14px 2px 6px">از ماه‌های قبل، هنوز منتظر پرداخت</div>${old.map(e => `<div class="card crow"><div><b>${esc(e.title)}</b><div class="eyebrow">${weekdayName(fromDayKey(e.date))} ${jDayMonth(fromDayKey(e.date))}</div></div><button class="pay" data-pay="${e.id}">پرداخت شد</button></div>`).join('')}` : ''}
+    </div>
+    <div class="note" style="margin-top:12px">وقتی پول جلسه رسید، «پرداخت شد» رو بزن و مبلغ رو تو «حساب من» ثبت کن. اگه اشتباهی زدی، روی «پرداخت ثبت شد» نگه دار تا برگرده.</div>`;
 }
 
 function report() {
@@ -248,6 +265,11 @@ async function toggleCancel(id, el) {
 // Long-press deletes a hand-added entry (for typos); everything else is kept with its history.
 let pressTimer = null, pressed = false;
 document.addEventListener('pointerdown', ev => {
+  if (ev.target.closest('.paid')) {
+    const host = ev.target.closest('.item[data-id]');
+    pressTimer = setTimeout(async () => { const e = host && state.entries.find(x => x.id === host.dataset.id); if (!e) return; pressed = true; delete e.paidAt; await db.putEntry(e); render(false); toast(`پرداخت ${e.title} برداشته شد`); }, 650);
+    return;
+  }
   const it = ev.target.closest('.item[data-id], .blk[data-id]');
   pressed = false;
   if (!it) return;
@@ -284,9 +306,21 @@ document.addEventListener('click', ev => {
   if (wk) { const d = +wk.dataset.wk; state.weekOffset = d === 0 ? 0 : state.weekOffset + d; render(); return; }
   const day = t.closest('[data-day]');
   if (day) { document.querySelector(`[data-open="${day.dataset.day}"]`).classList.toggle('on'); return; }
+  const pay = t.closest('[data-pay]');
+  if (pay) { markPaid(pay.dataset.pay); return; }
   const it = t.closest('.item[data-id], .blk[data-id]');
   if (it && !pressed) toggleCancel(it.dataset.id, it);
 });
+
+// Remembers the session as paid (undo from the toast or by holding the label).
+async function markPaid(id) {
+  const e = state.entries.find(x => x.id === id);
+  if (!e) return;
+  e.paidAt = new Date().toISOString(); e.updatedAt = e.paidAt;
+  await db.putEntry(e);
+  render(false);
+  toast(`پرداخت ${e.title} علامت خورد`, async () => { delete e.paidAt; await db.putEntry(e); render(false); });
+}
 document.addEventListener('submit', ev => {
   if (ev.target.id !== 'typed') return;
   ev.preventDefault();

@@ -185,3 +185,8 @@ input{font-family:inherit}
 .lg2 b{margin-right:auto;font-weight:700}
 
 @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+/* Ecosystem: payment link to «حساب من» */
+.pay { flex: 0 0 auto; margin-inline-start: 8px; padding: 6px 12px; border-radius: 999px; background: var(--burg); color: #fff; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.paid { flex: 0 0 auto; margin-inline-start: 8px; padding: 6px 10px; border-radius: 999px; background: rgba(120, 140, 110, .15); color: var(--sage); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.crow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; }
