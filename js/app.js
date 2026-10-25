@@ -184,7 +184,7 @@ function report() {
   const cancelled = all.filter(e => e.status === 'cancelled');
   const cnt = c => done.filter(e => e.cat === c).length;
   const hours = c => done.filter(e => e.cat === c).reduce((s, e) => s + (e.end - e.start), 0) / 60;
-  const fh = h => fa(Math.round(h * 10) / 10).replace('.', '٫');
+  const fh = h => '\u2066' + fa(Math.round(h * 10) / 10).replace('.', '٫') + '\u2069';
   const shiftTitles = [...new Set(done.filter(e => e.cat === 'shift').map(e => e.title))];
   const perShift = shiftTitles.map(t => { const xs = done.filter(e => e.cat === 'shift' && e.title === t); const ppl = xs.reduce((s, e) => s + (e.headcount || 0), 0); return { t, n: xs.length, ppl }; });
   const perGroup = groups().map(g => ({ g, n: done.filter(e => e.groupId === g.id).length, c: cancelled.filter(e => e.groupId === g.id).length })).filter(x => x.n || x.c);
