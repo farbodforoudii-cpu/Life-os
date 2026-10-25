@@ -30,14 +30,14 @@ function metaLine(e) {
   const bits = [];
   if (e.groupId && isActive(e)) {
     const info = sessionInfo(e);
-    bits.push(info && info.n ? `جلسه‌ی ${fa(info.n)} از ${fa(info.size)}` : 'خارج از دوره');
+    bits.push(info && info.n ? `جلسهٔ ${fa(info.n)} از ${fa(info.size)}` : 'خارج از دوره');
   }
   const hc = headcount(e);
   if (hc != null) bits.push(`${fa(hc)} ${e.cat === 'shift' ? 'شاگرد' : 'نفر'}`);
   else if (e.cat === 'shift' && liveStatus(e) === 'done') bits.push('؟ شاگرد');
   if (!e.groupId && !bits.length) bits.push(CATS[e.cat]);
   if (e.status === 'cancelled' && e.reason) bits.push(e.reason);
-  if (e.status === 'moved' && e.movedTo) { const t = store.get(e.movedTo); if (t) bits.push(`رفت به ${weekdayName(fromDayKey(t.date))} ${fmtTime(t.start)}`); }
+  if (e.status === 'moved' && e.movedTo) { const t = store.get(e.movedTo); if (t) bits.push(`منتقل شد به ${weekdayName(fromDayKey(t.date))} ${fmtTime(t.start)}`); }
   if (e.note) bits.push(e.note);
   if (e.cat === 'client' && isActive(e) && liveStatus(e) === 'done' && !isPaid(e)) bits.push('منتظر پرداخت');
   return bits.join('، ');
@@ -83,11 +83,31 @@ function today() {
       <div style="display:flex;align-items:center;gap:10px"><span class="eyebrow" style="text-align:left">${items.length ? `${fa(items.length)} برنامه${nc ? `، ${fa(nc)} لغو` : ''}` : ''}</span>
       <button class="icon-btn" data-act="settings" aria-label="تنظیمات و همگام‌سازی">${GEAR}<i class="sync-dot ${sync.state.status}"></i></button></div></div>
     <div class="days">${strip}</div>
-    <div class="cols"><div class="main list stagger">${heroH}${items.length ? items.map(e => itemHTML(e)).join('') : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامه‌ی ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
+    <div class="cols"><div class="main list stagger">${heroH}${isToday ? dayPath(items, now) : ''}${items.length ? items.map(e => itemHTML(e)).join('') : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامهٔ ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
       ${side ? `<aside class="side"><div class="eyebrow" style="margin-bottom:8px">فردا، ${weekdayName(addDays(now, 1))} ${jDayMonth(addDays(now, 1))}</div>
         <div class="list stagger" style="opacity:.85">${side.length ? side.map(e => itemHTML(e, true)).join('') : '<div class="card empty" style="padding:18px">هنوز چیزی نیست</div>'}</div></aside>` : ''}</div>`;
 }
 const fromJ = d => jDayMonth(d).split(' ')[0];
+
+// The day as a path from 7 in the morning (right) to midnight (left). It draws itself up to now and each
+// stop lights up as the line reaches it: done ones get a tick, the current one pulses, the rest wait hollow.
+function dayPath(items, now) {
+  if (!items.some(isActive)) return '';
+  const W = 340, m = minutesNow(now), X = min => W - 16 - pct(min) / 100 * (W - 32), Y = x => 40 + 11 * Math.sin((W - x) / W * Math.PI * 2.4);
+  let d = ''; for (let x = W - 16; x >= 15; x -= 4) d += `${d ? 'L' : 'M'}${x.toFixed(1)} ${Y(x).toFixed(1)}`;
+  const live = items.filter(isActive), done = live.filter(e => liveStatus(e, now) === 'done').length;
+  const stops = items.map(e => {
+    const st0 = liveStatus(e, now), st = st0 === 'moved' ? 'cancelled' : st0, x = X(e.start), y = Y(x), delay = (pct(e.start) / 100 * 1.4).toFixed(2);
+    const mark = st === 'done' ? `<path class="dp-tick" d="M${(x - 3.6).toFixed(1)} ${y.toFixed(1)}l2.6 2.6 5-5.2" pathLength="1"/>`
+      : st === 'cancelled' ? `<path class="dp-x" d="M${(x - 3).toFixed(1)} ${(y - 3).toFixed(1)}l6 6m0-6l-6 6"/>` : '';
+    return `<g class="dp-stop ${st}" style="--d:${delay}s;--c:var(--c-${e.cat})"><circle class="dp-ring" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8"/><circle class="dp-node" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8"/>${mark}<title>${esc(e.title)}، ${fmtTime(e.start)}</title></g>`;
+  }).join('');
+  const nx = X(m), np = pct(m);
+  const ticks = [7, 12, 17, 22].map(h => `<text x="${X(h * 60).toFixed(1)}" y="78" text-anchor="middle">${faDigits(h)}</text>`).join('');
+  return `<div class="card dpath"><div class="dp-head"><b>مسیر امروز</b><span>${faDigits(done)} از ${faDigits(live.length)} انجام شد</span></div>
+    <svg viewBox="0 0 ${W} 84" class="dp-svg"><path class="dp-base" d="${d}"/><path class="dp-prog" d="${d}" pathLength="100" style="--p:${np.toFixed(1)}"/>
+      ${stops}<g class="dp-now" style="--d:${(np / 100 * 1.4).toFixed(2)}s"><circle cx="${nx.toFixed(1)}" cy="${Y(nx).toFixed(1)}" r="4"/></g>${ticks}</svg></div>`;
+}
 
 function week() {
   const now = new Date(), s = addDays(weekStart(now), state.weekOff * 7);
@@ -96,7 +116,7 @@ function week() {
   const all = days.flatMap(d => entriesOn(dayKey(d)));
   const ok = c => all.filter(e => e.cat === c && isActive(e)).length;
   const sum = `${fa(ok('client'))} جلسه، ${fa(ok('shift'))} شیفت، ${fa(ok('uni'))} کلاس، ${fa(all.filter(e => !isActive(e)).length)} لغو`;
-  const label = state.weekOff === 0 ? 'این هفته' : state.weekOff === -1 ? 'هفته‌ی قبل' : state.weekOff === 1 ? 'هفته‌ی بعد' : 'هفته';
+  const label = state.weekOff === 0 ? 'این هفته' : state.weekOff === -1 ? 'هفتهٔ قبل' : state.weekOff === 1 ? 'هفتهٔ بعد' : 'هفته';
 
   let ax = ''; for (let h = 7; h <= 24; h++) ax += `<span style="right:${pct(h * 60)}%">${fa(h)}</span>`;
   let grid = ''; for (let h = 8; h < 24; h++) grid += `<i class="gridline" style="right:${pct(h * 60)}%"></i>`;
@@ -118,13 +138,13 @@ function week() {
   }).join('');
 
   return `<div class="head"><div><div class="eyebrow">${jDayMonth(days[0])} تا ${jDayMonth(days[6])}</div><h1 class="big">${label}</h1></div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px"><div class="wnav"><button data-wk="-1" aria-label="هفته‌ی قبل">→</button><button data-wk="0">امروز</button><button data-wk="1" aria-label="هفته‌ی بعد">←</button><button data-act="templates" class="accent">الگوی هفته</button></div><div class="eyebrow">${sum}</div></div></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px"><div class="wnav"><button data-wk="-1" aria-label="هفتهٔ قبل">→</button><button data-wk="0">امروز</button><button data-wk="1" aria-label="هفتهٔ بعد">←</button><button data-act="templates" class="accent">الگوی هفته</button></div><div class="eyebrow">${sum}</div></div></div>
     <div class="wide-only"><div class="card wk"><div class="axis">${ax}</div>${table}</div>
       <div class="legend">${Object.entries(CATS).map(([c, l]) => `<span><i style="background:var(--c-${c})"></i>${l}</span>`).join('')}</div></div>
-    <div class="narrow-only"><div class="eyebrow" style="font-weight:500;font-size:12px;margin:-8px 0 10px">روی هر روز بزن تا باز بشه. گوشی رو بچرخونی، جدول کامل میاد.</div>
+    <div class="narrow-only"><div class="eyebrow" style="font-weight:500;font-size:12px;margin:-8px 0 10px">روی هر روز بزن تا باز شود؛ با چرخاندن گوشی، جدول کامل نمایش داده می‌شود.</div>
       <div class="mw-axis"><span style="width:62px"></span><span style="position:relative;flex:1;height:14px">${mwa}</span><span style="width:30px"></span></div>
       <div class="card mw">${mini}</div></div>
-    ${store.all('template').length ? '' : `<div class="card empty" style="margin-top:14px"><b>هنوز الگوی هفته نداری</b>«الگوی هفته» رو بزن و برنامه‌ی ثابتت رو یک بار وارد کن؛ از اون به بعد هر هفته خودکار پر می‌شه.</div>`}`;
+    ${store.all('template').length ? '' : `<div class="card empty" style="margin-top:14px"><b>هنوز الگوی هفته نداری</b>«الگوی هفته» را بزن و برنامهٔ ثابتت را یک بار وارد کن؛ از آن به بعد هر هفته خودکار پر می‌شود.</div>`}`;
 }
 
 function clients() {
@@ -137,14 +157,14 @@ function clients() {
     return `<button class="cl ${warn ? 'warn' : ''}" data-act="group" data-id="${g.id}">
       <div class="cl-top"><b>${esc(g.name)}</b><span>${st.current ? `${fa(st.done)}/${fa(size)}` : 'بدون دوره'}</span></div>
       ${st.current ? `<div class="prog">${Array.from({ length: size }, (_, i) => `<i class="${i < st.done ? 'f' : ''}"></i>`).join('')}</div>` : ''}
-      <div class="cl-sub"><span>${!st.current ? 'دوره تعریف نشده' : st.left <= 0 ? 'دوره تموم شد، وقت تمدید' : warn ? '۱ جلسه مانده، وقت تمدید' : `${fa(st.left)} جلسه مانده`}${unpaid ? '، <em class="unpaid">پرداخت نشده</em>' : ''}${st.outside ? `، ${fa(st.outside)} جلسه خارج از دوره` : ''}</span>
+      <div class="cl-sub"><span>${!st.current ? 'دوره تعریف نشده' : st.left <= 0 ? 'دوره تمام شد؛ وقت تمدید' : warn ? '۱ جلسه مانده؛ وقت تمدید' : `${fa(st.left)} جلسه مانده`}${unpaid ? '، <em class="unpaid">پرداخت نشده</em>' : ''}${st.outside ? `، ${fa(st.outside)} جلسه خارج از دوره` : ''}</span>
       <span>${st.next ? `بعدی: ${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : ''}</span></div>
       <div class="cl-sub"><span>${(g.members || []).length ? `${fa(g.members.length)} نفر: ${esc(g.members.join('، '))}` : ''}</span><span>${g.place ? esc(g.place) : ''}</span></div></button>`;
   }).join('');
   const waiting = awaitingPayment();
   return `<div class="head"><div><div class="eyebrow">${list.length ? `${fa(list.length)} گروه فعال` : 'دوره‌ها و جلسه‌ها'}${waiting.length ? `، <span style="color:var(--burg)">${fa(waiting.length)} جلسه منتظر پرداخت</span>` : ''}</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
-    ${list.length ? `<div class="cl-grid stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» رو بزن: اسم گروه، اعضا و تعداد جلسه‌های دوره. شماره‌ی جلسه‌ها بعد از اون خودکار حساب می‌شه.')}`;
+    ${list.length ? `<div class="cl-grid stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}`;
 }
 
 function report() {
@@ -171,14 +191,16 @@ function report() {
   const places = [...done.filter(e => e.cat === 'personal').reduce((m, e) => m.set(e.title, (m.get(e.title) || 0) + 1), new Map())].sort((a, b) => b[1] - a[1]).slice(0, 8);
   const seg = `<div class="seg">${[['week', 'هفته'], ['month', 'ماه'], ['year', 'سال']].map(([v, l]) => `<button class="${state.reportRange === v ? 'on' : ''}" data-range="${v}">${l}</button>`).join('')}</div>`;
   const head = `<div class="head"><div><div class="eyebrow">تا امروز</div><h1 class="big">گزارش ${title}</h1></div>${seg}</div>`;
-  if (!all.length) return head + empty('هنوز داده‌ای برای این بازه نیست', 'گزارش فقط از چیزهایی ساخته می‌شه که واقعاً ثبت شدن.');
+  if (!all.length) return head + empty('هنوز داده‌ای برای این بازه نیست', 'گزارش فقط از ثبت‌های واقعی ساخته می‌شود.');
   const cats = Object.keys(CATS);
   const totalH = cats.reduce((s, c) => s + hours(c), 0);
+  const N = reportNews(done, cancelled, all, perGroup, hours, fh);
   return head + `<div class="grid4 stagger">
-      <div class="w"><h3>جلسه‌ی مراجع</h3><div class="num" data-count="${cnt('client')}">۰</div><div class="note">${fh(hours('client'))} ساعت</div></div>
+      <div class="w"><h3>جلسهٔ مراجع</h3><div class="num" data-count="${cnt('client')}">۰</div><div class="note">${fh(hours('client'))} ساعت</div></div>
       <div class="w"><h3>شیفت</h3><div class="num" data-count="${cnt('shift')}">۰</div><div class="note">${perShift.map(x => `${esc(x.t)} ${fa(x.n)}`).join('، ') || '—'}</div></div>
       <div class="w"><h3>کلاس دانشگاه</h3><div class="num" data-count="${cnt('uni')}">۰</div><div class="note">${fh(hours('uni'))} ساعت</div></div>
       <div class="w"><h3>لغوها</h3><div class="num" data-count="${cancelled.length}" style="color:var(--burg)">۰</div><div class="note">${fa(cancelled.filter(e => e.cat === 'client').length)} مراجع، ${fa(cancelled.filter(e => e.cat !== 'client').length)} بقیه</div></div></div>
+    ${N.length ? `<div class="eyebrow" style="margin:20px 2px 10px">خبرهای این بازه</div><div class="feed stagger">${N.map(x => `<div class="news"><span class="news-k ${x.tone || ''}">${x.k}</span><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>` : ''}
     <div class="grid2">
       <div class="w"><h3>زمان کجا رفت</h3>
         <div class="stack" role="img" aria-label="${cats.map(c => `${CATS[c]} ${fh(hours(c))} ساعت`).join('، ')}">${cats.filter(c => hours(c) > 0).map((c, i) => `<div title="${CATS[c]}، ${fh(hours(c))} ساعت" style="flex:${hours(c)};background:var(--c-${c});animation-delay:${i * .1}s"></div>`).join('')}</div>
@@ -191,6 +213,22 @@ function report() {
       <div class="w"><h3>رفت‌وآمدها و کارهای شخصی</h3>
         ${places.length ? `<div class="chips">${places.map(([t, n]) => `<span class="chip" style="min-height:34px;padding:6px 12px;font-size:13px">${esc(t)}، ${fa(n)}</span>`).join('')}</div>` : '<div class="note">—</div>'}</div>
     </div>`;
+}
+
+// The range told as short news; every number says where it comes from.
+function reportNews(done, cancelled, all, perGroup, hours, fh) {
+  const N = [], wait = awaitingPayment().sort((a, b) => a.date.localeCompare(b.date));
+  if (wait.length) N.push({ k: 'پرداخت', t: `${fa(wait.length)} جلسه منتظر پرداخت`, d: `قدیمی‌ترین: ${wait[0].title}، ${weekdayName(fromDayKey(wait[0].date))} ${jDayMonth(fromDayKey(wait[0].date))}.`, tone: 'r' });
+  else if (done.some(e => e.cat === 'client')) N.push({ k: 'پرداخت', t: 'همهٔ جلسه‌ها تسویه شده', d: 'هیچ جلسهٔ تمام‌شده‌ای منتظر پرداخت نیست.', tone: 'g' });
+  const top = perGroup.slice().sort((a, b) => b.n - a.n)[0];
+  if (top && perGroup.length > 1) N.push({ k: 'مراجع', t: `${top.g.name}، بیشترین جلسه با ${fa(top.n)} بار`, d: `از ${fa(perGroup.length)} مراجع در این بازه.` });
+  const wd = new Map(); for (const e of done.filter(e => e.cat === 'client' || e.cat === 'shift')) { const w = weekdayName(fromDayKey(e.date)); wd.set(w, (wd.get(w) || 0) + (e.end - e.start) / 60); }
+  const busy = [...wd].sort((a, b) => b[1] - a[1])[0];
+  if (busy && wd.size > 1) N.push({ k: 'زمان', t: `پرکارترین روز: ${busy[0]}‌ها`, d: `جمعاً ${fh(busy[1])} ساعت جلسه و شیفت.` });
+  const work = hours('client') + hours('shift'), pers = hours('personal');
+  if (work) N.push({ k: 'تعادل', t: `${fh(pers)} ساعت برای خودت`, d: `در برابر ${fh(work)} ساعت کار (جلسه + شیفت).` });
+  if (cancelled.length >= 2) N.push({ k: 'لغو', t: `${fa(cancelled.length)} لغو`, d: `${fa(Math.round(cancelled.length / all.length * 100))}٪ برنامه‌ها = لغو ÷ همهٔ برنامه‌های این بازه.`, tone: 'r' });
+  return N;
 }
 
 const SCREENS = [today, week, clients, report];
@@ -228,15 +266,31 @@ function movePill() {
   p.style.width = r.width + 'px';
 }
 
+// Numbers roll in like an odometer, each digit on its own strip.
+const DIG = '۰۱۲۳۴۵۶۷۸۹';
 function countUp(el) {
-  const end = +el.dataset.count;
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = fa(end); return; }
-  const t0 = performance.now();
-  (function f(now) {
-    const k = Math.min(1, (now - t0) / 900);
-    el.textContent = fa(Math.round(end * (1 - Math.pow(1 - k, 3))));
-    if (k < 1) requestAnimationFrame(f);
-  })(t0);
+  const text = fa(+el.dataset.count);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = text; return; }
+  el.innerHTML = [...text].map(ch => `<span class="odo"><span class="odo-w">${ch}</span><span class="odo-strip" data-d="${DIG.indexOf(ch)}">${[...DIG].map(d => `<span>${d}</span>`).join('')}</span></span>`).join('');
+  requestAnimationFrame(() => requestAnimationFrame(() => el.querySelectorAll('.odo-strip').forEach((st, i) => {
+    st.style.transitionDelay = `${150 + i * 70}ms`; st.style.transform = `translateY(${-st.dataset.d * 10}%)`;
+  })));
+}
+
+// Saved: a black pill grows from the top, draws a tick, says what happened, then shows a second line.
+function island(a, as, right, b, bv) {
+  document.querySelector('.island')?.remove();
+  const el = document.createElement('div');
+  el.className = 'island';
+  el.innerHTML = `<svg class="is-tick" viewBox="0 0 52 52"><circle cx="26" cy="26" r="23" pathLength="1"/><path d="M16 27l7 7 14-15" pathLength="1"/></svg>
+    <div class="is-txt"><div class="is-a"><b>${esc(a)}</b><small>${esc(as)}</small></div><div class="is-b"><small>${esc(b)}</small><b>${esc(bv)}</b></div></div><b class="is-r">${esc(right)}</b>`;
+  document.body.appendChild(el);
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
+  setTimeout(() => el.classList.add('two'), reduced ? 0 : 1300);
+  setTimeout(() => el.classList.add('close'), 3400);
+  setTimeout(() => el.remove(), 4000);
+  el.onclick = () => el.classList.add('close');
 }
 
 // ---------- toast ----------
@@ -283,7 +337,7 @@ const SHEETS = {
       ${timeInputs(start, end)}
       <div class="eyebrow">یه لمس = ثبت</div>
       <div class="chips">${learnedPresets().map(p => `<button class="chip" data-quick="${esc(p.title)}" data-cat="${p.cat}"><i class="dot" style="background:var(--c-${p.cat})"></i>${esc(p.title)}</button>`).join('')}</div>
-      ${gs.length ? `<div class="eyebrow">جلسه‌ی مراجع (مثلاً جبرانی)</div><div class="chips">${gs.map(g => `<button class="chip" data-quickgroup="${g.id}"><i class="dot" style="background:var(--c-client)"></i>${esc(g.name)}</button>`).join('')}</div>` : ''}
+      ${gs.length ? `<div class="eyebrow">جلسهٔ مراجع (مثلاً جبرانی)</div><div class="chips">${gs.map(g => `<button class="chip" data-quickgroup="${g.id}"><i class="dot" style="background:var(--c-client)"></i>${esc(g.name)}</button>`).join('')}</div>` : ''}
       <div class="eyebrow">چیز جدید</div>
       ${catChips(s.cat || 'personal')}
       <form class="inp" data-form="typed"><label for="typedIn" class="sr">عنوان</label><input id="typedIn" type="text" placeholder="مثلاً «دندانپزشکی» یا «خونه دیباجی»" autocomplete="off" enterkeyhint="done"><button type="submit">ثبت</button></form>`;
@@ -300,27 +354,27 @@ const SHEETS = {
     const stateLine = { done: 'انجام شد', now: 'الان در جریانه', planned: 'برنامه‌ریزی‌شده', cancelled: `لغو شد${e.reason ? `، ${e.reason}` : ''}`, moved: 'جابه‌جا شد' }[st];
     let body = `<div class="it-head"><i class="dot" style="background:var(--c-${e.cat});width:12px;height:12px;border-radius:6px"></i>
       <div><div class="it-title">${esc(e.title)}</div><div class="eyebrow">${weekdayName(d)} ${jDayMonth(d)}، ${fmtTime(e.start)} تا ${fmtTime(e.end)}، ${stateLine}</div>
-      ${info ? `<div class="eyebrow" style="color:var(--sage)">${info.n ? `جلسه‌ی ${fa(info.n)} از ${fa(info.size)}` : 'خارج از دوره، دوره‌ی جدید لازمه'}</div>` : ''}</div></div>`;
+      ${info ? `<div class="eyebrow" style="color:var(--sage)">${info.n ? `جلسهٔ ${fa(info.n)} از ${fa(info.size)}` : 'خارج از دوره؛ دورهٔ جدید لازم است'}</div>` : ''}</div></div>`;
     if (g && g.members && g.members.length) {
-      body += `<div class="eyebrow">حاضرها (${fa(hc)} از ${fa(g.members.length)})، روی کسی که نبود بزن</div>
+      body += `<div class="eyebrow">حاضرها (${fa(hc)} از ${fa(g.members.length)})؛ روی غایب‌ها بزن</div>
         <div class="chips">${g.members.map(n => `<button class="chip ${absent.has(n) ? 'off' : 'sel'}" data-absent="${esc(n)}">${esc(n)}</button>`).join('')}</div>`;
     } else if (e.cat === 'shift' || e.cat === 'client') {
       const guess = hc ?? lastHeadcount(e.title, e.date) ?? (e.templateId && store.get(e.templateId)?.headcount) ?? null;
-      body += `<div class="eyebrow">تعداد ${e.cat === 'shift' ? 'شاگردها' : 'نفرات'}${hc == null && guess != null ? ` (دفعه‌ی قبل ${fa(guess)})` : ''}</div>
+      body += `<div class="eyebrow">تعداد ${e.cat === 'shift' ? 'شاگردها' : 'نفرات'}${hc == null && guess != null ? ` (دفعهٔ قبل ${fa(guess)})` : ''}</div>
         <div class="stepper"><button data-hc="-1" aria-label="کمتر">−</button><b>${hc == null ? '؟' : fa(hc)}</b><button data-hc="1" aria-label="بیشتر">+</button>${hc == null && guess != null ? `<button class="chip" data-hcset="${guess}">همون ${fa(guess)}</button>` : ''}</div>`;
     }
     if (e.cat === 'client' && isActive(e) && st === 'done') {
       const series = info && info.series;
-      body += series && series.paid ? '<p class="hint">پول این جلسه با دوره پرداخت شده.</p>'
-        : `<button class="wide-btn ${e.paidAt ? 'ghost' : ''}" data-act="toggle-paid">${e.paidAt ? 'پرداخت ثبت شده؛ برداشتن' : 'پول این جلسه رسید'}</button>`;
+      body += series && series.paid ? '<p class="hint">مبلغ این جلسه با دوره پرداخت شده است.</p>'
+        : `<button class="wide-btn ${e.paidAt ? 'ghost' : ''}" data-act="toggle-paid">${e.paidAt ? 'پرداخت ثبت شده؛ برداشتن' : 'مبلغ این جلسه رسید'}</button>`;
     }
     if (isActive(e)) {
-      body += `<div class="eyebrow">لغو شد؟ دلیل رو بزن</div>
+      body += `<div class="eyebrow">لغو شد؟ دلیلش را انتخاب کن</div>
         <div class="chips">${CANCEL_REASONS.filter(r => e.cat === 'uni' ? r !== 'مراجع نیومد' && r !== 'مراجع خبر داد' : r !== 'استاد نیومد').map(r => `<button class="chip cancel-chip" data-cancel="${r}">${r}</button>`).join('')}<button class="chip cancel-chip" data-cancel="">بدون دلیل</button></div>
         <div class="eyebrow">جابه‌جا شد؟ روز جدید</div>${dayChips(null, 'data-moveday')}`;
     } else {
-      body += `<button class="wide-btn" data-act="restore">برگردون به برنامه</button>`;
-      if (e.movedTo) body += `<button class="wide-btn ghost" data-open="${e.movedTo}">دیدن جلسه‌ی جدید</button>`;
+      body += `<button class="wide-btn" data-act="restore">بازگرداندن به برنامه</button>`;
+      if (e.movedTo) body += `<button class="wide-btn ghost" data-open="${e.movedTo}">دیدن جلسهٔ جدید</button>`;
     }
     body += `<details class="more"><summary>ویرایش</summary>
       <label class="fld">عنوان<input id="fTitle" value="${esc(e.title)}"></label>
@@ -339,7 +393,7 @@ const SHEETS = {
       return `<div class="tp-day"><b>${WEEKDAYS[dn]}</b>${xs.length ? xs.map(t => `<button class="tp-row" data-act="tpl" data-id="${t.id}"><i class="dot" style="background:var(--c-${t.cat})"></i><span class="tp-time">${fmtTime(t.start)}–${fmtTime(t.end)}</span><span>${esc(t.title)}</span>${t.headcount ? `<em>${fa(t.headcount)} نفر</em>` : ''}</button>`).join('') : '<span class="soft" style="font-size:13px">آزاد</span>'}</div>`;
     }).join('');
     return sheetHead('الگوی هفته', '<button class="pill-btn" data-act="tpl-new">+ ردیف</button>') +
-      `<p class="hint">برنامه‌ی ثابت رو یک بار اینجا وارد کن. هر ردیف می‌تونه چند روز داشته باشه (مثلاً زوج‌ها ۷:۳۰). از امروز به بعد هر هفته خودکار پر می‌شه؛ روزهای گذشته دست نمی‌خورن.</p>${rows}`;
+      `<p class="hint">برنامهٔ ثابت را یک بار این‌جا وارد کن. هر ردیف می‌تواند چند روز داشته باشد (مثلاً زوج‌ها ۷:۳۰). از امروز به بعد هر هفته خودکار پر می‌شود؛ روزهای گذشته دست نمی‌خورند.</p>${rows}`;
   },
 
   tpl(s) {
@@ -368,12 +422,12 @@ const SHEETS = {
     const hist = store.all('entry').filter(e => e.groupId === g.id && e.date <= todayKey()).sort(byTime).reverse().slice(0, 12);
     return sheetHead(esc(g.name), '<button class="pill-btn" data-act="group-edit">ویرایش</button>') + `
       <div class="eyebrow">${(g.members || []).length ? `${fa(g.members.length)} نفر: ${esc(g.members.join('، '))}` : ''}${g.place ? `، ${esc(g.place)}` : ''}</div>
-      <div class="cards-row"><div class="mini"><span>دوره‌ی فعلی</span><b>${st.current ? `${fa(st.done)} از ${fa(st.current.size)}` : '—'}</b></div>
-        <div class="mini"><span>جلسه‌ی بعد</span><b>${st.next ? `${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : '—'}</b></div>
+      <div class="cards-row"><div class="mini"><span>دورهٔ فعلی</span><b>${st.current ? `${fa(st.done)} از ${fa(st.current.size)}` : '—'}</b></div>
+        <div class="mini"><span>جلسهٔ بعد</span><b>${st.next ? `${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : '—'}</b></div>
         <div class="mini"><span>کل جلسه‌ها</span><b>${fa(st.total)}</b></div></div>
-      <div class="sh-sub"><b>دوره‌ها</b><button class="pill-btn" data-act="series-new">+ دوره‌ی جدید</button></div>
+      <div class="sh-sub"><b>دوره‌ها</b><button class="pill-btn" data-act="series-new">+ دورهٔ جدید</button></div>
       ${series.length ? series.map(x => `<div class="sr-row"><span>${fa(x.size)} جلسه، از ${weekdayName(fromDayKey(x.start))} ${jDayMonth(fromDayKey(x.start))}</span>
-        <button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></div>`).join('') : '<p class="hint">هنوز دوره‌ای نیست. «دوره‌ی جدید» رو بزن.</p>'}
+        <button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></div>`).join('') : '<p class="hint">هنوز دوره‌ای نیست. «دورهٔ جدید» را بزن.</p>'}
       <div class="sh-sub"><b>سابقه</b></div>
       ${hist.length ? hist.map(e => { const n = nums.get(e.id); return `<button class="hs-row ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><b>${isActive(e) ? (n ? fa(n.n) : '–') : '✕'}</b><span>${weekdayName(fromDayKey(e.date))} ${jDayMonth(fromDayKey(e.date))}</span><em>${isActive(e) ? `${fa(headcount(e) ?? '')} نفر` : (e.reason || 'لغو')}</em></button>`; }).join('') : '<p class="hint">هنوز جلسه‌ای ثبت نشده.</p>'}`;
   },
@@ -384,7 +438,7 @@ const SHEETS = {
       <label class="fld">اسم گروه<input id="fName" value="${esc(g.name)}" placeholder="مثلاً عباس آقا و خانم فروزنده"></label>
       <label class="fld">اعضا (با ویرگول جدا کن)<input id="fMembers" value="${esc((g.members || []).join('، '))}" placeholder="عباس، فروزنده"></label>
       <label class="fld">محل جلسه‌ها (اختیاری)<input id="fPlace" value="${esc(g.place || '')}"></label>
-      ${s.id ? '' : `<label class="fld">تعداد جلسه‌های دوره‌ی فعلی<input id="fSize" type="number" inputmode="numeric" min="1" value="8"></label>
+      ${s.id ? '' : `<label class="fld">تعداد جلسه‌های دورهٔ فعلی<input id="fSize" type="number" inputmode="numeric" min="1" value="8"></label>
       <label class="fld">چند جلسه از این دوره تا امروز رفته؟ (برای شروع وسط دوره)<input id="fDone" type="number" inputmode="numeric" min="0" value="0"></label>
       <label class="chk"><input type="checkbox" id="fPaid"> این دوره پرداخت شده</label>`}
       <button class="wide-btn" data-act="save-group">ذخیره</button>
@@ -393,16 +447,16 @@ const SHEETS = {
 
   seriesNew(s) {
     const last = seriesOf(s.groupId).pop();
-    return sheetHead('دوره‌ی جدید') + `
+    return sheetHead('دورهٔ جدید') + `
       <label class="fld">تعداد جلسه‌ها<input id="fSize" type="number" inputmode="numeric" min="1" value="${last ? last.size : 8}"></label>
-      <div class="eyebrow">از کِی شروع می‌شه؟</div>${dayChips(0)}
+      <div class="eyebrow">از کِی شروع می‌شود؟</div>${dayChips(0)}
       <label class="chk"><input type="checkbox" id="fPaid"> پرداخت شده</label>
       <button class="wide-btn" data-act="save-series">ذخیره</button>`;
   },
 
   settings() {
     const st = sync.state;
-    const statusText = { off: 'خاموش', idle: st.lastSync ? `همگام، ${new Date(st.lastSync).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : 'آماده', syncing: 'در حال همگام‌سازی…', error: 'خطا', offline: 'آفلاین؛ بعداً همگام می‌شه' }[st.status];
+    const statusText = { off: 'خاموش', idle: st.lastSync ? `همگام، ${new Date(st.lastSync).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : 'آماده', syncing: 'در حال همگام‌سازی…', error: 'خطا', offline: 'آفلاین؛ بعداً همگام می‌شود' }[st.status];
     const dirty = store.dirtyItems().length;
     return sheetHead('تنظیمات') + `
       <div class="sh-sub"><b>همگام‌سازی iPad و آیفون</b><span class="sync-badge ${st.status}">${statusText}</span></div>
@@ -410,7 +464,7 @@ const SHEETS = {
         ${st.error ? `<p class="err">${esc(st.error)}</p>` : ''}
         <button class="wide-btn" data-act="sync-now">همگام‌سازی الان</button>
         <button class="wide-btn ghost" data-act="sign-out">خروج از حساب</button>`
-      : `<p class="hint">روی هر دو دستگاه با یک ایمیل و رمز وارد شو؛ از اون به بعد همه‌چیز خودکار یکی می‌شه. اپ بدون اینترنت هم کار می‌کنه و بعداً همگام می‌شه.</p>
+      : `<p class="hint">روی هر دو دستگاه با یک ایمیل و رمز وارد شو؛ از آن به بعد همه‌چیز خودکار یکی می‌شود. اپ بدون اینترنت هم کار می‌کند و بعداً همگام می‌شود.</p>
         ${st.error ? `<p class="err">${esc(st.error)}</p>` : ''}
         <form data-form="auth" class="auth"><label class="fld">ایمیل<input id="aEmail" type="email" autocomplete="username" inputmode="email" dir="ltr"></label>
         <label class="fld">رمز (حداقل ۶ حرف)<input id="aPass" type="password" autocomplete="current-password" dir="ltr"></label>
@@ -418,7 +472,7 @@ const SHEETS = {
       <div class="sh-sub"><b>پشتیبان و سوابق</b></div>
       <button class="wide-btn ghost" data-act="export">گرفتن فایل پشتیبان</button>
       <label class="wide-btn ghost file">بازکردن فایل پشتیبان یا سوابق<input type="file" id="importFile" accept="application/json,.json"></label>
-      <p class="hint">فایل سوابق (مثلاً تقویم ۱۴۰۵ که از Keynote تبدیل می‌شه) هم از همین‌جا وارد می‌شه. چیزی پاک نمی‌شه؛ فقط اضافه یا به‌روز می‌شه.</p>`;
+      <p class="hint">فایل سوابق (مثلاً تقویم ۱۴۰۵ که از Keynote تبدیل شده) هم از همین‌جا وارد می‌شود. چیزی حذف نمی‌شود؛ فقط اضافه یا به‌روز می‌شود.</p>`;
   },
 };
 const sameDays = (a, b) => a.length === b.length && b.every(d => a.includes(d));
@@ -443,6 +497,7 @@ async function addEntry(f) {
   state.dayOff = s.dayOff;
   await render(false);
   setTimeout(() => { state.lastNew = null; }, 700);
+  island(e.title, CATS[e.cat], fmtTime(e.start), s.dayOff === 0 ? 'امروز' : weekdayName(fromDayKey(k)), `${fa(entriesOn(k).filter(isActive).length)} برنامه`);
   toast(`ثبت شد: ${e.title}، ${s.dayOff === 0 ? '' : weekdayName(fromDayKey(k)) + ' '}${fmtTime(e.start)}`, async () => { await store.remove(e); render(false); });
 }
 
@@ -481,7 +536,7 @@ async function importFile(file) {
     await render(false);
     renderSheet();
   } catch {
-    toast('فایل قابل خوندن نبود');
+    toast('فایل خوانده نشد');
   }
 }
 
@@ -540,13 +595,15 @@ document.addEventListener('click', async ev => {
       const k = dayKey(addDays(new Date(), +md.dataset.moveday));
       const moved = newEntry({ date: k, start: e.start, end: e.end, title: e.title, cat: e.cat, groupId: e.groupId || null, movedFrom: e.id, absent: e.absent, note: e.note });
       await store.put(moved);
-      await updateItem(e, x => { x.status = 'moved'; x.movedTo = moved.id; logChange(x, { status: 'moved', to: k }); }, `رفت به ${weekdayName(fromDayKey(k))}`, async () => { await store.remove(moved); });
+      await updateItem(e, x => { x.status = 'moved'; x.movedTo = moved.id; logChange(x, { status: 'moved', to: k }); }, `منتقل شد به ${weekdayName(fromDayKey(k))}`, async () => { await store.remove(moved); });
       openSheet('item', { id: moved.id });
       return;
     }
     if (act === 'toggle-paid') {
-      const was = !!e.paidAt;
+      const was = !!e.paidAt, btn = t.closest('[data-act="toggle-paid"]');
+      if (!was && btn) { btn.classList.add('ok'); btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 12.5l4 4 8-9" pathLength="1"/></svg>'; await new Promise(r => setTimeout(r, 600)); }
       await updateItem(e, x => { x.paidAt = was ? null : new Date().toISOString(); logChange(x, { paid: !was }); }, was ? `پرداخت ${e.title} برداشته شد` : `پرداخت ${e.title} ثبت شد`);
+      if (!was) { const left = awaitingPayment().length; island('پرداخت ثبت شد', e.title, '', 'منتظر پرداخت', left ? `${fa(left)} جلسه` : 'همه تسویه شد'); }
       return;
     }
     if (act === 'restore') {
@@ -563,9 +620,9 @@ document.addEventListener('click', async ev => {
       toast('ذخیره شد'); closeSheet(); return;
     }
     if (act === 'delete-item') {
-      if (!confirm(`«${e.title}» کامل پاک بشه؟ (برای لغو، از دکمه‌های لغو استفاده کن)`)) return;
+      if (!confirm(`«${e.title}» کامل حذف شود؟ (برای لغو، از دکمه‌های لغو استفاده کن)`)) return;
       await store.remove(e); closeSheet(); await render(false);
-      toast(`پاک شد: ${e.title}`, async () => { e.deleted = false; await store.put(e); render(false); });
+      toast(`حذف شد: ${e.title}`, async () => { e.deleted = false; await store.put(e); render(false); });
       return;
     }
   }
@@ -583,7 +640,7 @@ document.addEventListener('click', async ev => {
       if (!d.days.length) { toast('حداقل یک روز انتخاب کن'); return; }
       const g = d.cat === 'client' && d.groupId ? store.get(d.groupId) : null;
       const title = $('#fTitle').value.trim() || (g ? g.name : '');
-      if (!title) { toast('عنوان رو بنویس'); return; }
+      if (!title) { toast('عنوان را بنویس'); return; }
       const start = toMin($('#fStart').value), end = Math.max(toMin($('#fEnd').value), start + 15);
       const tpl = s.id ? store.get(s.id) : { id: uid(), kind: 'template', from: todayKey() };
       Object.assign(tpl, { days: [...d.days], start, end, title, cat: d.cat, groupId: d.cat === 'client' ? d.groupId : null, headcount: $('#fHead') && $('#fHead').value !== '' ? +$('#fHead').value : null });
@@ -596,7 +653,7 @@ document.addEventListener('click', async ev => {
     }
     if (act === 'delete-tpl') {
       const tpl = store.get(s.id);
-      if (!confirm(`«${tpl.title}» از الگو حذف بشه؟ جلسه‌های گذشته می‌مونن.`)) return;
+      if (!confirm(`«${tpl.title}» از الگو حذف شود؟ جلسه‌های گذشته می‌مانند.`)) return;
       tpl.until = dayKey(addDays(new Date(), 0));
       await store.put(tpl);
       await applyTemplate(tpl);
@@ -612,7 +669,7 @@ document.addEventListener('click', async ev => {
 
   if (s.kind === 'groupEdit' && act === 'save-group') {
     const name = $('#fName').value.trim();
-    if (!name) { toast('اسم رو بنویس'); return; }
+    if (!name) { toast('نام را بنویس'); return; }
     const members = $('#fMembers').value.split(/[,،]/).map(x => x.trim()).filter(Boolean);
     const g = s.id ? store.get(s.id) : { id: uid(), kind: 'group' };
     Object.assign(g, { name, members, place: $('#fPlace').value.trim() || null });
@@ -629,7 +686,7 @@ document.addEventListener('click', async ev => {
   }
   if (s.kind === 'groupEdit' && act === 'archive-group') {
     const g = store.get(s.id);
-    if (!confirm(`«${g.name}» بایگانی بشه؟ سابقه‌اش می‌مونه.`)) return;
+    if (!confirm(`«${g.name}» بایگانی شود؟ سابقه‌اش می‌ماند.`)) return;
     g.archived = true; await store.put(g); closeSheet(); await render(false); return;
   }
 
@@ -656,7 +713,7 @@ document.addEventListener('submit', async ev => {
     try {
       if (mode === 'up') {
         const r = await sync.signUp(email, pass);
-        if (r === 'confirm') { toast('ایمیل تأیید فرستاده شد؛ لینکش رو بزن و بعد «ورود»'); renderSheet(); return; }
+        if (r === 'confirm') { toast('ایمیل تأیید فرستاده شد؛ لینکش را بزن و بعد «ورود»'); renderSheet(); return; }
       } else await sync.signIn(email, pass);
       renderSheet();
       await sync.run();

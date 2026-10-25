@@ -31,7 +31,8 @@ input{font-family:inherit}
 
 .scr{animation:enter .38s var(--ease) both}
 @keyframes enter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.stagger>*{animation:rise .42s var(--ease) both}
+.scr .stagger>*{animation:rise .5s var(--ease) both}
+.scr .stagger>:nth-child(2){animation-delay:.05s}.scr .stagger>:nth-child(3){animation-delay:.1s}.scr .stagger>:nth-child(4){animation-delay:.15s}.scr .stagger>:nth-child(5){animation-delay:.2s}.scr .stagger>:nth-child(n+6){animation-delay:.25s}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
 .head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:18px;flex-wrap:wrap}
@@ -279,3 +280,95 @@ input{font-family:inherit}
 .pay { flex: 0 0 auto; margin-inline-start: 8px; padding: 6px 12px; border-radius: 999px; background: var(--burg); color: #fff; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .paid { flex: 0 0 auto; margin-inline-start: 8px; padding: 6px 10px; border-radius: 999px; background: rgba(120, 140, 110, .15); color: var(--sage); font-size: 12px; font-weight: 700; white-space: nowrap; }
 .crow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; }
+
+/* ===== Motion pack ===== */
+:root{--spring:cubic-bezier(.34,1.56,.64,1)}
+@keyframes rise{from{opacity:0;transform:translateY(12px) scale(.985);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+.tab.on svg{animation:tabPop .5s var(--spring)}
+@keyframes tabPop{0%{transform:scale(.7) translateY(3px)}100%{transform:none}}
+.card,.w,.news{transition:transform .35s var(--spring)}
+.w:active,.news:active{transform:scale(.975);transition-duration:.12s}
+
+/* Day path */
+.dpath{padding:14px 16px 6px;overflow:hidden}
+.dp-head{display:flex;justify-content:space-between;align-items:baseline;font-size:14px}
+.dp-head span{font-size:12px;color:var(--muted);font-weight:600}
+.dp-svg{width:100%;height:auto;display:block;overflow:visible}
+.dp-svg text{font-size:10px;fill:var(--muted);font-family:Vazirmatn,system-ui}
+.dp-base{fill:none;stroke:var(--sep);stroke-width:3;stroke-linecap:round}
+.dp-prog{fill:none;stroke:var(--sage);stroke-width:3;stroke-linecap:round;stroke-dasharray:var(--p) 100}
+.scr .dp-prog{animation:dpDraw 1.4s cubic-bezier(.45,0,.2,1) .15s both}
+@keyframes dpDraw{from{stroke-dasharray:0 100}}
+.dp-node{fill:var(--card);stroke:var(--muted);stroke-width:2;transform-box:fill-box;transform-origin:center}
+.dp-stop.done .dp-node,.dp-stop.now .dp-node{fill:var(--c);stroke:var(--c)}
+.dp-stop.cancelled .dp-node{stroke:var(--burg);opacity:.4}
+.dp-tick{fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1}
+.dp-x{stroke:var(--burg);stroke-width:1.6;stroke-linecap:round;opacity:.6}
+.dp-ring{fill:none;stroke:var(--c);stroke-width:2;opacity:0;transform-box:fill-box;transform-origin:center}
+.dp-stop.now .dp-ring{animation:dpRing 1.8s ease-out infinite}
+@keyframes dpRing{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(2.2)}}
+.scr .dp-node{animation:dpPop .5s var(--spring) calc(var(--d) + .15s) both}
+.scr .dp-tick{animation:dpTick .35s ease calc(var(--d) + .45s) both}
+@keyframes dpPop{from{transform:scale(0)}}
+@keyframes dpTick{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+.dp-now circle{fill:var(--sage);stroke:var(--card);stroke-width:2}
+.scr .dp-now{animation:fadeIn .3s ease calc(var(--d) + .15s) both}
+@keyframes fadeIn{from{opacity:0}}
+
+/* Island */
+.island{position:fixed;z-index:20;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:126px;height:37px;border-radius:20px;background:#000;color:#fff;overflow:hidden;display:flex;align-items:center;gap:12px;padding:0 14px;opacity:0;box-shadow:0 12px 40px rgba(0,0,0,.35);transition:width .55s var(--spring),height .55s var(--spring),border-radius .55s var(--spring),opacity .2s}
+.island.open{opacity:1;width:min(360px,calc(100vw - 24px));height:74px;border-radius:30px}
+.island.close{width:126px;height:37px;border-radius:20px;opacity:0;transition:width .45s var(--ease),height .45s var(--ease),border-radius .45s,opacity .3s .25s}
+.island>*{opacity:0;transform:scale(.85);filter:blur(4px);transition:opacity .25s,transform .4s var(--ease),filter .3s}
+.island.open>*{opacity:1;transform:none;filter:none;transition-delay:.18s}
+.island.close>*{opacity:0;transition-delay:0s}
+.is-tick{width:40px;height:40px;flex:0 0 auto;fill:none;stroke:#8FB096;stroke-width:3.6;stroke-linecap:round;stroke-linejoin:round}
+.is-tick circle,.is-tick path{stroke-dasharray:1;stroke-dashoffset:1}
+.island.open .is-tick circle{animation:dpTick .5s var(--ease) .3s forwards}
+.island.open .is-tick path{animation:dpTick .35s var(--ease) .7s forwards}
+.is-txt{flex:1;min-width:0;position:relative;height:40px}
+.is-a,.is-b{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;transition:opacity .35s,transform .45s var(--ease),filter .35s}
+.is-a b,.is-b b{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.is-a small,.is-b small{font-size:12px;color:rgba(235,235,245,.55)}
+.is-b{opacity:0;transform:translateY(14px);filter:blur(4px)}
+.island.two .is-a{opacity:0;transform:translateY(-14px);filter:blur(4px)}
+.island.two .is-b{opacity:1;transform:none;filter:none}
+.is-r{font-size:16px;font-weight:700;color:#8FB096;white-space:nowrap}
+
+/* Pay: pill folds into a ticked circle */
+.wide-btn{transition:width .4s var(--spring),background .3s}
+.wide-btn.ok{width:52px;align-self:center;background:var(--sage);color:#fff;display:flex;align-items:center;justify-content:center;border-radius:26px}
+.wide-btn.ok svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;animation:dpTick .35s ease .15s both}
+.pay{transition:width .4s var(--spring),padding .4s var(--spring),background .3s;display:inline-flex;align-items:center;justify-content:center;border:0;font-family:inherit}
+.pay.ok{width:30px;height:30px;padding:0;background:var(--sage)}
+.pay.ok svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;animation:dpTick .35s ease .15s both}
+
+/* Odometer digits */
+.odo{display:inline-block;position:relative;height:1.1em;line-height:1.1em;overflow:hidden;vertical-align:bottom}
+.odo-w{visibility:hidden}
+.odo-strip{position:absolute;top:0;left:-.2em;right:-.2em;text-align:center;transition:transform 1s cubic-bezier(.2,.8,.2,1)}
+.odo-strip>span{display:block;height:1.1em}
+
+/* Report: bento + news */
+.bento4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (min-width:760px){.bento4{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.w.lead{background:var(--sage);color:#fff}
+.w.lead h3,.w.lead .note{color:rgba(255,255,255,.75)}
+.w .num.burg{color:var(--burg)}
+.time-w{margin-top:12px}
+.feed{display:flex;flex-direction:column;gap:10px}
+.news{background:var(--card);border-radius:20px;padding:14px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px}
+.news b{font-size:16px;line-height:1.5}
+.news p{margin:0;font-size:13px;color:var(--muted);line-height:1.7}
+.news-k{align-self:flex-start;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--fill);color:var(--muted)}
+.news-k.g{background:var(--sage-soft);color:var(--sage)}
+.news-k.r{background:var(--burg-soft);color:var(--burg)}
+
+/* Light sweep on the "now" card */
+.scr .hero{position:relative;overflow:hidden}
+.scr .hero::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.35) 50%,transparent 65%);transform:translateX(110%);animation:sweep 1.4s var(--ease) .3s both}
+@media (prefers-color-scheme:dark){.scr .hero::after{background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.08) 50%,transparent 65%)}}
+@keyframes sweep{to{transform:translateX(-110%)}}
+.w .num{direction:ltr;unicode-bidi:isolate;text-align:right}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .w.lead{color:#121412}:root:not([data-theme="light"]) .w.lead h3,:root:not([data-theme="light"]) .w.lead .note{color:rgba(18,20,18,.7)}}
+:root[data-theme="dark"] .w.lead{color:#121412}
