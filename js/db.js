@@ -1,16 +1,27 @@
-// Small IndexedDB wrapper. All data is also kept in memory; writes go through to disk.
+// Small IndexedDB wrapper. Every record lives in one `items` store, told apart by `kind`.
 const DB_NAME = 'life-os';
-const VERSION = 1;
+const VERSION = 2;
 
 let dbp = null;
 function open() {
   if (dbp) return dbp;
   dbp = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = ev => {
       const db = req.result;
-      if (!db.objectStoreNames.contains('entries')) db.createObjectStore('entries', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('items')) db.createObjectStore('items', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      // v1 kept entries in their own store; move them over.
+      if (ev.oldVersion === 1 && db.objectStoreNames.contains('entries')) {
+        const tx = req.transaction;
+        const items = tx.objectStore('items');
+        tx.objectStore('entries').openCursor().onsuccess = e => {
+          const c = e.target.result;
+          if (!c) { db.deleteObjectStore('entries'); return; }
+          items.put({ kind: 'entry', ...c.value });
+          c.continue();
+        };
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -29,9 +40,8 @@ function run(store, mode, fn) {
 }
 
 export const db = {
-  allEntries: () => run('entries', 'readonly', s => s.getAll()),
-  putEntry: e => run('entries', 'readwrite', s => { s.put(e); }),
-  deleteEntry: id => run('entries', 'readwrite', s => { s.delete(id); }),
+  allItems: () => run('items', 'readonly', s => s.getAll()),
+  putItems: list => run('items', 'readwrite', s => { for (const it of list) s.put(it); }),
   get: key => run('kv', 'readonly', s => s.get(key)),
   set: (key, val) => run('kv', 'readwrite', s => { s.put(val, key); }),
 };
