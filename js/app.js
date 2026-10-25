@@ -195,11 +195,18 @@ function report() {
   const cats = Object.keys(CATS);
   const totalH = cats.reduce((s, c) => s + hours(c), 0);
   const N = reportNews(done, cancelled, all, perGroup, hours, fh);
-  return head + `<div class="grid4 stagger">
-      <div class="w"><h3>جلسهٔ مراجع</h3><div class="num" data-count="${cnt('client')}">۰</div><div class="note">${fh(hours('client'))} ساعت</div></div>
-      <div class="w"><h3>شیفت</h3><div class="num" data-count="${cnt('shift')}">۰</div><div class="note">${perShift.map(x => `${esc(x.t)} ${fa(x.n)}`).join('، ') || '—'}</div></div>
-      <div class="w"><h3>کلاس دانشگاه</h3><div class="num" data-count="${cnt('uni')}">۰</div><div class="note">${fh(hours('uni'))} ساعت</div></div>
-      <div class="w"><h3>لغوها</h3><div class="num" data-count="${cancelled.length}" style="color:var(--burg)">۰</div><div class="note">${fa(cancelled.filter(e => e.cat === 'client').length)} مراجع، ${fa(cancelled.filter(e => e.cat !== 'client').length)} بقیه</div></div></div>
+  // Stats bento: one big number with a hatched corner, a wide tile with the range growing day by day,
+  // then three small counts.
+  const days = [...new Set(all.map(e => e.date))].sort(), cum = [];
+  let acc = 0; for (const k of days) { acc += done.filter(e => e.date === k && (e.cat === 'client' || e.cat === 'shift')).reduce((s2, e) => s2 + (e.end - e.start) / 60, 0); cum.push(acc); }
+  const bars = Array.from({ length: 11 }, (_, i) => cum.length ? cum[Math.round(i * (cum.length - 1) / 10)] : 0), bmx = Math.max(1, ...bars);
+  return head + `<div class="sb stagger">
+      <div class="sb-main"><div class="hatch"></div><span class="sb-pill"><i class="pulse"></i>جلسهٔ مراجع</span><div class="num" data-count="${cnt('client')}">۰</div><p>${fh(hours('client'))} ساعت جلسه${perGroup.length ? ` با ${fa(perGroup.length)} مراجع` : ''}.</p></div>
+      <div class="sb-wide"><div><h3>ساعت کار</h3><div class="num sm" data-count="${Math.round(hours('client') + hours('shift'))}">۰</div><small>جلسه + شیفت، روز به روز</small></div>
+        <div class="sb-bars">${bars.map((v, i) => `<i style="height:${Math.max(8, v / bmx * 100).toFixed(0)}%;animation-delay:${(.25 + i * .04).toFixed(2)}s"></i>`).join('')}</div></div>
+      <div class="sb-s"><div class="num sm" data-count="${cnt('shift')}">۰</div><h3>شیفت</h3></div>
+      <div class="sb-s"><div class="num sm" data-count="${cnt('uni')}">۰</div><h3>کلاس</h3></div>
+      <div class="sb-s"><div class="num sm burg" data-count="${cancelled.length}">۰</div><h3>لغو</h3></div></div>
     ${N.length ? `<div class="eyebrow" style="margin:20px 2px 10px">خبرهای این بازه</div><div class="feed stagger">${N.map(x => `<div class="news"><span class="news-k ${x.tone || ''}">${x.k}</span><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>` : ''}
     <div class="grid2">
       <div class="w"><h3>زمان کجا رفت</h3>
@@ -207,7 +214,7 @@ function report() {
         <div class="lg2" style="margin-top:6px">${cats.map(c => `<span><i style="background:var(--c-${c})"></i>${CATS[c]}<b>${fh(hours(c))} ساعت</b></span>`).join('')}</div>
         <div class="note">مجموع ${fh(totalH)} ساعت ثبت‌شده</div></div>
       <div class="w"><h3>جلسه‌ها به تفکیک مراجع</h3>
-        ${perGroup.length ? perGroup.map(x => `<div class="rrow"><span>${esc(x.g.name)}</span><b>${fa(x.n)}</b>${x.c ? `<em>${fa(x.c)} لغو</em>` : ''}</div>`).join('') : '<div class="note">—</div>'}</div>
+        ${perGroup.length ? perGroup.slice().sort((x, y) => y.n - x.n).map((x, i, arr) => `<div class="act"><div class="act-top"><span>${esc(x.g.name)}</span><b>${fa(x.n)}${x.c ? `<em>، ${fa(x.c)} لغو</em>` : ''}</b></div><div class="act-bar"><i style="width:${(x.n / Math.max(1, arr[0].n) * 100).toFixed(0)}%;animation-delay:${(.3 + i * .07).toFixed(2)}s"></i></div></div>`).join('') : '<div class="note">—</div>'}</div>
       <div class="w"><h3>شاگردهای شیفت‌ها</h3>
         ${perShift.length ? perShift.map(x => `<div class="rrow"><span>${esc(x.t)}</span><b>${fa(x.ppl)} نفر</b><em>${fa(x.n)} شیفت${x.n ? `، میانگین ${fa(Math.round(x.ppl / x.n * 10) / 10).replace('.', '٫')}` : ''}</em></div>`).join('') : '<div class="note">—</div>'}</div>
       <div class="w"><h3>رفت‌وآمدها و کارهای شخصی</h3>
