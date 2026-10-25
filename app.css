@@ -274,3 +274,8 @@ input{font-family:inherit}
 .seg{display:flex;gap:2px;background:var(--fill);padding:4px;border-radius:14px}
 .seg button{border:0;background:transparent;border-radius:11px;padding:7px 16px;font-size:14px;font-weight:600;color:var(--muted);min-height:36px;transition:background .2s,color .2s}
 .seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+
+/* Ecosystem: payment link to «حساب من» */
+.pay { flex: 0 0 auto; margin-inline-start: 8px; padding: 6px 12px; border-radius: 999px; background: var(--burg); color: #fff; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.paid { flex: 0 0 auto; margin-inline-start: 8px; padding: 6px 10px; border-radius: 999px; background: rgba(120, 140, 110, .15); color: var(--sage); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.crow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; }

@@ -6,7 +6,7 @@ import {
   CATS, CANCEL_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
   weekStart, fmtTime, toMin, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
-  groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets,
+  groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -39,6 +39,7 @@ function metaLine(e) {
   if (e.status === 'cancelled' && e.reason) bits.push(e.reason);
   if (e.status === 'moved' && e.movedTo) { const t = store.get(e.movedTo); if (t) bits.push(`رفت به ${weekdayName(fromDayKey(t.date))} ${fmtTime(t.start)}`); }
   if (e.note) bits.push(e.note);
+  if (e.cat === 'client' && isActive(e) && liveStatus(e) === 'done' && !isPaid(e)) bits.push('منتظر پرداخت');
   return bits.join('، ');
 }
 
@@ -140,7 +141,8 @@ function clients() {
       <span>${st.next ? `بعدی: ${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : ''}</span></div>
       <div class="cl-sub"><span>${(g.members || []).length ? `${fa(g.members.length)} نفر: ${esc(g.members.join('، '))}` : ''}</span><span>${g.place ? esc(g.place) : ''}</span></div></button>`;
   }).join('');
-  return `<div class="head"><div><div class="eyebrow">${list.length ? `${fa(list.length)} گروه فعال` : 'دوره‌ها و جلسه‌ها'}</div><h1 class="big">مراجع‌ها</h1></div>
+  const waiting = awaitingPayment();
+  return `<div class="head"><div><div class="eyebrow">${list.length ? `${fa(list.length)} گروه فعال` : 'دوره‌ها و جلسه‌ها'}${waiting.length ? `، <span style="color:var(--burg)">${fa(waiting.length)} جلسه منتظر پرداخت</span>` : ''}</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
     ${list.length ? `<div class="cl-grid stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» رو بزن: اسم گروه، اعضا و تعداد جلسه‌های دوره. شماره‌ی جلسه‌ها بعد از اون خودکار حساب می‌شه.')}`;
 }
@@ -306,6 +308,11 @@ const SHEETS = {
       const guess = hc ?? lastHeadcount(e.title, e.date) ?? (e.templateId && store.get(e.templateId)?.headcount) ?? null;
       body += `<div class="eyebrow">تعداد ${e.cat === 'shift' ? 'شاگردها' : 'نفرات'}${hc == null && guess != null ? ` (دفعه‌ی قبل ${fa(guess)})` : ''}</div>
         <div class="stepper"><button data-hc="-1" aria-label="کمتر">−</button><b>${hc == null ? '؟' : fa(hc)}</b><button data-hc="1" aria-label="بیشتر">+</button>${hc == null && guess != null ? `<button class="chip" data-hcset="${guess}">همون ${fa(guess)}</button>` : ''}</div>`;
+    }
+    if (e.cat === 'client' && isActive(e) && st === 'done') {
+      const series = info && info.series;
+      body += series && series.paid ? '<p class="hint">پول این جلسه با دوره پرداخت شده.</p>'
+        : `<button class="wide-btn ${e.paidAt ? 'ghost' : ''}" data-act="toggle-paid">${e.paidAt ? 'پرداخت ثبت شده؛ برداشتن' : 'پول این جلسه رسید'}</button>`;
     }
     if (isActive(e)) {
       body += `<div class="eyebrow">لغو شد؟ دلیل رو بزن</div>
@@ -535,6 +542,11 @@ document.addEventListener('click', async ev => {
       await store.put(moved);
       await updateItem(e, x => { x.status = 'moved'; x.movedTo = moved.id; logChange(x, { status: 'moved', to: k }); }, `رفت به ${weekdayName(fromDayKey(k))}`, async () => { await store.remove(moved); });
       openSheet('item', { id: moved.id });
+      return;
+    }
+    if (act === 'toggle-paid') {
+      const was = !!e.paidAt;
+      await updateItem(e, x => { x.paidAt = was ? null : new Date().toISOString(); logChange(x, { paid: !was }); }, was ? `پرداخت ${e.title} برداشته شد` : `پرداخت ${e.title} ثبت شد`);
       return;
     }
     if (act === 'restore') {

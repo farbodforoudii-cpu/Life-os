@@ -167,6 +167,15 @@ export function groupStatus(gid, now = new Date()) {
   return { current, done, booked, left: current ? current.size - done : 0, next, last, outside, total: sessions.filter(e => liveStatus(e, now) === 'done').length + series.reduce((s, x) => s + (x.offset || 0), 0) };
 }
 
+// A finished client session is paid if its package was paid or it was marked paid on its own.
+export function isPaid(e) {
+  if (e.paidAt) return true;
+  const info = e.groupId ? numberSessions(e.groupId).get(e.id) : null;
+  return !!(info && info.series && info.series.paid);
+}
+export const awaitingPayment = (now = new Date()) =>
+  store.all('entry').filter(e => e.cat === 'client' && isActive(e) && liveStatus(e, now) === 'done' && !isPaid(e)).sort(byTime);
+
 // Who is expected: all members minus those marked absent; a manual count wins.
 export function headcount(e) {
   if (e.headcount != null) return e.headcount;
