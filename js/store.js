@@ -51,6 +51,11 @@ export const store = {
     return changed.length;
   },
   dirtyItems: () => [...dirty].map(id => items.get(id)).filter(Boolean),
+  // Joining a sync space (maybe a different one than before): everything here has to be sent again.
+  async markAllDirty() {
+    for (const id of items.keys()) dirty.add(id);
+    await db.set('dirty', [...dirty]);
+  },
   async clean(sent) {
     for (const { id, updatedAt } of sent) {
       // Only forget it if it did not change again while it was being sent.

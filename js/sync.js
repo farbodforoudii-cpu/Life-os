@@ -72,6 +72,7 @@ export const sync = {
   async start(key) {
     state.key = key;
     await db.set('syncKey', key);
+    await store.markAllDirty();
     state.cursor = null;
     await db.set('syncCursor', null);
     set({ status: 'idle', error: '' });
