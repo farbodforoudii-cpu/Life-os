@@ -7,7 +7,7 @@ import {
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
+  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -1001,7 +1001,10 @@ setInterval(() => { if (!state.sheet && state.tab < 2) render(false); }, 60000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !state.sheet) render(false); });
 // Remote changes arriving from sync redraw what is on screen.
 let redraw;
-store.onChange(() => { clearTimeout(redraw); redraw = setTimeout(() => { render(false); }, 150); });
+store.onChange(() => { clearTimeout(redraw); redraw = setTimeout(() => { render(false); }, 150); clearTimeout(billTimer); billTimer = setTimeout(refreshBills, 3000); });
+// Finished packages become bills for «حساب من»; checked again whenever the app comes back.
+let billTimer;
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearTimeout(billTimer); billTimer = setTimeout(refreshBills, 3000); } });
 sync.onChange(() => { const dot = document.querySelector('.sync-dot'); if (dot) dot.className = `sync-dot ${sync.state.status}`; if (state.sheet?.kind === 'settings') renderSheet(); });
 
 // ---------- boot ----------
@@ -1011,6 +1014,7 @@ sync.onChange(() => { const dot = document.querySelector('.sync-dot'); if (dot) 
   await sync.init();
   await render();
   requestPersistence();
-  sync.run();
+  // Bills are written after the first pull, so a payment answered in «حساب من» is seen first.
+  sync.run().then(() => refreshBills());
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

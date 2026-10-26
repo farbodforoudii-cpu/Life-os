@@ -221,6 +221,46 @@ export function invoiceOf(seriesId) {
 }
 export const profile = () => store.get('profile') || { id: 'profile', kind: 'profile' };
 
+// ---------- link with «حساب من» ----------
+// A finished package leaves a bill (`bill_<package id>`) that «حساب من» shows in its inbox. Money is recorded
+// there only when the user confirms; the answer comes back as a payment record (`pay_<package id>`, written by
+// «حساب من») and marks the package paid here. Only this app writes bills and packages, only «حساب من» writes
+// payments, so the two never overwrite each other.
+const BILL_KEYS = ['groupId', 'name', 'total', 'count', 'missing', 'from', 'to', 'period', 'paid'];
+const periodOf = rows => {
+  const ms = [...new Set(rows.map(r => jMonthYear(fromDayKey(r.e.date))))];
+  return ms.length > 1 ? `${ms[0].split(' ')[0]}–${ms[ms.length - 1]}` : ms[0] || '';
+};
+let billing = false;
+export async function refreshBills(now = new Date()) {
+  if (billing) return;
+  billing = true;
+  try {
+    const put = [];
+    for (const p of store.all('payment')) {
+      const s = store.get(p.seriesId);
+      if (!s) continue;
+      if ((p.how === 'tx' || p.how === 'existing') && !s.paid) { s.paid = true; s.paidAt = p.at; s.paidVia = 'hesab'; put.push(s); }
+      if (p.how === 'undo' && s.paid && s.paidVia === 'hesab' && s.paidAt <= p.at) { s.paid = false; delete s.paidAt; delete s.paidVia; put.push(s); }
+    }
+    if (put.length) await store.put(...put);
+    const bills = [];
+    for (const s of store.all('series')) {
+      const g = store.get(s.groupId), id = `bill_${s.id}`, old = store.get(id);
+      if (!g || (!old && (s.paid || !seriesDone(s, now)))) continue;
+      const v = invoiceOf(s.id);
+      const want = { groupId: g.id, name: g.name, total: v.total, count: v.rows.length, missing: v.missing,
+        from: v.rows[0]?.e.date || s.start, to: v.rows[v.rows.length - 1]?.e.date || s.start, period: periodOf(v.rows), paid: !!s.paid };
+      if (old && BILL_KEYS.every(k => old[k] === want[k])) continue;
+      bills.push({ ...(old || { id, kind: 'bill', seriesId: s.id, issuedAt: now.toISOString() }), ...want });
+    }
+    for (const b of store.all('bill')) if (!store.get(b.seriesId)) { b.deleted = true; bills.push(b); }
+    if (bills.length) await store.put(...bills);
+  } finally {
+    billing = false;
+  }
+}
+
 // Who is expected: all members minus those marked absent; a manual count wins.
 export function headcount(e) {
   if (e.headcount != null) return e.headcount;

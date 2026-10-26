@@ -77,10 +77,12 @@ design and working rules below; hesab-man is the reference when in doubt.
 Farbod chose to keep the two apps separate and link them through the shared Supabase project instead of merging
 them into one PWA (which the iOS storage limit would otherwise require).
 - Both apps sync into `public.eco_items` (one space per sync code; the server stores only the code's SHA-256);
-  column `app` = `life` | `hesab`. Each app pulls only its own rows today. One code joins every device and both apps
+  column `app` = `life` | `hesab`. Each app pulls its own rows; hesab-man also reads life `bill` / `payment` rows. One code joins every device and both apps
   (1405/08/04: Farbod chose a code over email/password for simplicity). `public.life_items` is the old, unused table.
-- Next steps, in order: (a) prices on groups/series in life-os; (b) life-os writes «طلب» / expense drafts that
-  hesab-man shows in an inbox for **one-tap confirmation** (money is never recorded silently); (c) a payment
-  confirmed in hesab-man marks the package/session paid in life-os; (d) a shared monthly report (hours, sessions,
-  income, income per hour, open receivables).
+- Done 1405/08/04: (a) prices per headcount on groups (with history) and per session, invoices per package; (b)+(c) finished
+  packages become `bill_<series>` rows that hesab-man shows in an inbox, its one-tap answer `pay_<series>` marks the
+  package paid (format: hesab-man `docs/ECOSYSTEM.md` §1).
+- Money is never recorded silently: hesab-man records income only on the user's tap.
+- Next: (d) a shared monthly report (hours, sessions, income, income per hour, open receivables); expense context
+  (which session or place a payment happened around) from life-os entries.
 - Details of the sync format: hesab-man `docs/ECOSYSTEM.md`.
