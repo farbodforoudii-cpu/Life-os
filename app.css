@@ -428,23 +428,5 @@ input{font-family:inherit}
 .inv-row b{font-size:15px}
 .inv-row span{font-size:13px;color:var(--muted);flex:1}
 .inv-row em{font-style:normal;font-size:13px;font-weight:700;color:var(--sage)}
-.inv{background:var(--card);border-radius:20px;padding:18px;box-shadow:inset 0 0 0 1px var(--sep);display:flex;flex-direction:column;gap:12px}
-.inv-top{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
-.inv-top>div{display:flex;flex-direction:column;gap:2px}
-.inv-name{font-size:22px;font-weight:800}
-.inv-period{font-size:14px;font-weight:700;color:var(--sage)}
-.inv-meta{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted)}
-.inv-t{width:100%;border-collapse:collapse;font-size:14px;direction:rtl}
-.inv-t th{font-size:12px;color:var(--sage);font-weight:700;background:var(--sage-soft);padding:9px 8px;text-align:right}
-.inv-t th:first-child{border-radius:0 10px 10px 0}.inv-t th:last-child{border-radius:10px 0 0 10px;text-align:left}
-.inv-t td{padding:9px 8px;border-bottom:1px solid var(--sep)}
-.inv-t td:first-child{font-weight:700;width:44px}
-.inv-t td:last-child{text-align:left;font-weight:600;white-space:nowrap}
-.inv-t tr.soon td{color:var(--muted)}
-.inv-t tfoot td{border-bottom:0;border-top:2px solid var(--ink);font-weight:800;font-size:16px;padding-top:12px}
-.inv-state{align-self:flex-start;font-size:13px;font-weight:700;padding:6px 12px;border-radius:12px;background:var(--burg-soft);color:var(--burg)}
-.inv-state.ok{background:var(--sage-soft);color:var(--sage)}
-.inv-pay{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:13px;color:var(--muted);border-top:1px dashed var(--sep);padding-top:12px}
-.inv-pay b{color:var(--ink);font-size:14px}
-.inv-t td:nth-child(2){white-space:nowrap}
-@media (max-width:480px){.inv{padding:14px}.inv-t{font-size:13px}.inv-t td,.inv-t th{padding:8px 4px}}
+.inv-prev{flex-shrink:0;background:#fff;border-radius:18px;box-shadow:inset 0 0 0 1px var(--sep);overflow:hidden;min-height:240px}
+.inv-prev img{display:block;width:100%;height:auto}

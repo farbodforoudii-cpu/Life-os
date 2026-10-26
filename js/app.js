@@ -1,7 +1,7 @@
 import { requestPersistence } from './db.js';
 import { store } from './store.js';
 import { sync } from './sync.js';
-import { faDigits, WEEKDAYS } from './jalali.js';
+import { faDigits, WEEKDAYS, MONTHS, toJalali } from './jalali.js';
 import {
   CATS, CANCEL_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
@@ -529,7 +529,9 @@ const SHEETS = {
     const v = invoiceOf(s.id);
     if (!v) return sheetHead('پیدا نشد');
     const left = v.rows.filter(r => !r.done).length;
-    return sheetHead('فاکتور') + invoiceHTML(v) + `
+    const lang = v.g.invoiceLang === 'en' ? 'en' : 'fa';
+    return sheetHead('فاکتور', `<div class="seg"><button class="${lang === 'fa' ? 'on' : ''}" data-invlang="fa">فارسی</button><button class="${lang === 'en' ? 'on' : ''}" data-invlang="en">English</button></div>`) + `
+      <div class="inv-prev"><img id="invImg" alt="پیش‌نمایش فاکتور"></div>
       ${v.missing ? `<button class="wide-btn ghost" data-act="prices" data-id="${v.g.id}">${fa(v.missing)} جلسه قیمت ندارد؛ بزن تا وارد کنی</button>` : ''}
       <p class="hint">جمع = مجموع مبلغ ${fa(v.rows.length)} جلسهٔ این دوره. مبلغ هر جلسه از فهرست قیمت مراجع و بر اساس تعداد حاضران همان جلسه است، مگر برای آن جلسه مبلغ جداگانه ثبت شده باشد.${left ? ` ${fa(left)} جلسه هنوز برگزار نشده است.` : ''}</p>
       <button class="wide-btn" data-act="inv-image" data-id="${v.s.id}">ارسال تصویر فاکتور</button>
@@ -543,6 +545,7 @@ const SHEETS = {
     return sheetHead('اطلاعات پرداخت روی فاکتور') + `
       <p class="hint">پایین هر فاکتور نوشته می‌شود. فقط روی دستگاه‌های شما و فضای همگام‌سازی خودتان نگه داشته می‌شود.</p>
       <label class="fld">نام<input id="fPName" value="${esc(pr.name || '')}"></label>
+      <label class="fld">نام به انگلیسی (برای فاکتور انگلیسی)<input id="fPNameEn" dir="ltr" value="${esc(pr.nameEn || '')}"></label>
       <label class="fld">شمارهٔ کارت<input id="fPCard" dir="ltr" inputmode="numeric" value="${esc(pr.card || '')}"></label>
       <label class="fld">شمارهٔ شبا<input id="fPIban" dir="ltr" autocapitalize="characters" value="${esc(pr.iban || '')}"></label>
       <button class="wide-btn" data-act="save-profile">ذخیره</button>`;
@@ -578,75 +581,93 @@ function priceList(g) {
   return `<div class="chips">${Object.entries(row.by).map(([n, v]) => `<span class="chip small static">${n === '1' ? 'خصوصی' : `${fa(n)} نفر`}: ${num(v)}</span>`).join('')}</div><p class="hint">از ${jFull(row.from)}، به تومان</p>`;
 }
 
-const jMonthsOf = rows => { const ms = [...new Set(rows.map(r => jMonthYear(fromDayKey(r.e.date))))]; return ms.length > 1 ? `${ms[0].split(' ')[0]}–${ms[ms.length - 1]}` : ms[0] || ''; };
-function invoiceHTML(v) {
-  const g = v.g, pr = profile();
-  return `<div class="inv"><div class="inv-top"><div><span class="eyebrow">فاکتور جلسه‌های تمرین</span><b class="inv-name">${esc(g.invoiceName || g.name)}</b></div><span class="inv-period">${jMonthsOf(v.rows)}</span></div>
-    ${g.phone || g.address ? `<div class="inv-meta">${g.phone ? `<bdi dir="ltr">${esc(g.phone)}</bdi>` : ''}${g.address ? `<span>${esc(g.address)}</span>` : ''}</div>` : ''}
-    <table class="inv-t"><thead><tr><th>جلسه</th><th>تاریخ</th><th>نوع</th><th>مبلغ (تومان)</th></tr></thead>
-      <tbody>${v.rows.map(r => `<tr class="${r.done ? '' : 'soon'}"><td>${fa(r.n)}</td><td>${jFull(r.e.date)}</td><td>${sessionKind(r.e)}</td><td>${r.price != null ? num(r.price) : '—'}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="3">جمع</td><td>${num(v.total)}</td></tr></tfoot></table>
-    <div class="inv-state ${v.s.paid ? 'ok' : ''}">${v.s.paid ? 'پرداخت شد' : 'در انتظار پرداخت'}</div>
-    ${pr.card || pr.iban ? `<div class="inv-pay">${pr.name ? `<b>${esc(pr.name)}</b>` : ''}${pr.card ? `<span>شمارهٔ کارت <bdi dir="ltr">${esc(pr.card)}</bdi></span>` : ''}${pr.iban ? `<span>شبا <bdi dir="ltr">${esc(pr.iban)}</bdi></span>` : ''}</div>` : ''}</div>`;
+// ---------- invoice ----------
+// One language per invoice, Persian or English (chosen per client), drawn as an image: what is previewed is what is sent.
+const EN_MONTHS = ['Farvardin', 'Ordibehesht', 'Khordad', 'Tir', 'Mordad', 'Shahrivar', 'Mehr', 'Aban', 'Azar', 'Dey', 'Bahman', 'Esfand'];
+const EN_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const INV = {
+  fa: { title: 'فاکتور جلسه‌های تمرین', n: 'جلسه', date: 'تاریخ', kind: 'نوع', amount: 'مبلغ (تومان)', total: 'جمع', unit: 'تومان', paid: 'پرداخت شد', card: 'شمارهٔ کارت', iban: 'شمارهٔ شبا', to: 'به نام' },
+  en: { title: 'Training invoice', n: '#', date: 'Date', kind: 'Session', amount: 'Amount (Toman)', total: 'Total', unit: 'Toman', paid: 'Paid', card: 'Card number', iban: 'IBAN', to: 'Payable to' },
+};
+function invoiceParts(v) {
+  const lang = v.g.invoiceLang === 'en' ? 'en' : 'fa', en = lang === 'en', pr = profile();
+  const d = n => en ? String(n) : fa(n);
+  const amount = n => n == null ? '—' : en ? Number(n).toLocaleString('en-US') : money(n);
+  const jd = k => { const x = fromDayKey(k), j = toJalali(x); return en ? `${EN_DAYS[x.getDay()]} ${j.jd} ${EN_MONTHS[j.jm - 1]}` : `${weekdayName(x)} ${jDayMonth(x)}`; };
+  const months = [...new Map(v.rows.map(r => { const j = toJalali(fromDayKey(r.e.date)); return [`${j.jy}-${j.jm}`, j]; })).values()];
+  const mName = j => en ? EN_MONTHS[j.jm - 1] : MONTHS[j.jm - 1];
+  const period = months.length ? `${mName(months[0])}${months.length > 1 ? `–${mName(months[months.length - 1])}` : ''} ${d(months[months.length - 1].jy)}` : '';
+  const kind = e => { const h = headcount(e); return h === 1 ? (en ? 'Private' : 'خصوصی') : en ? `Group${h ? ` (${h})` : ''}` : `گروهی${h ? `، ${fa(h)} نفر` : ''}`; };
+  return {
+    lang, L: INV[lang], name: en ? (v.g.invoiceName || v.g.name) : v.g.name, period,
+    rows: v.rows.map(r => ({ n: d(r.n), date: jd(r.e.date), kind: kind(r.e), amount: amount(r.price), done: r.done })),
+    total: amount(v.total), paid: v.s.paid,
+    payee: en ? (pr.nameEn || '') : (pr.name || ''),
+    card: pr.card ? (en ? pr.card : fa(pr.card)) : '', iban: pr.iban ? (en ? pr.iban : pr.iban.replace(/\d/g, c => fa(c))) : '',
+  };
 }
 
 function invoiceText(v) {
-  const g = v.g, pr = profile();
-  return [`فاکتور جلسه‌های تمرین، ${g.invoiceName || g.name}`, jMonthsOf(v.rows), '',
-    ...v.rows.map(r => `${fa(r.n)}. ${jFull(r.e.date)}، ${sessionKind(r.e)}، ${r.price != null ? `${money(r.price)} تومان` : 'بدون قیمت'}`), '',
-    `جمع: ${money(v.total)} تومان`,
-    ...(pr.card || pr.iban ? ['', pr.name || '', pr.card ? `شمارهٔ کارت: ${pr.card}` : '', pr.iban ? `شبا: ${pr.iban}` : ''].filter((x, i) => i === 0 || x) : [])].join('\n');
+  const x = invoiceParts(v), L = x.L, sep = x.lang === 'en' ? ', ' : '، ';
+  return [`${L.title}${sep}${x.name}`, x.period, '',
+    ...x.rows.map(r => `${r.n}. ${r.date}${sep}${r.kind}${sep}${r.amount}`), '',
+    `${L.total}: ${x.total} ${L.unit}`,
+    ...(x.card || x.iban ? ['', x.payee ? `${L.to} ${x.payee}` : '', x.card ? `${L.card}: ${x.card}` : '', x.iban ? `${L.iban}: ${x.iban}` : ''].filter((s, i) => i === 0 || s) : [])].join('\n');
 }
 
-// The invoice drawn as an image (for WhatsApp/Telegram), the same layout as on screen.
 async function invoiceImage(v) {
-  try { await Promise.all(['400 28px Vazirmatn', '700 28px Vazirmatn', '800 28px Vazirmatn'].map(f => document.fonts.load(f))); } catch { /* system font */ }
-  const g = v.g, pr = profile(), W = 1080, P = 64, RH = 74;
-  const hasPay = pr.card || pr.iban, H = 330 + (g.phone || g.address ? 60 : 0) + (v.rows.length + 2) * RH + 110 + (hasPay ? 190 : 0) + P;
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
-  const x = c.getContext('2d');
-  const C = { bg: '#FFFFFF', ink: '#1F2421', muted: '#696E69', sep: '#E7E7E2', fill: '#F3F3EF', sage: '#5E8A66', sageSoft: '#E8EFE8', burg: '#8E3349', burgSoft: '#F4E7EA' };
-  x.fillStyle = C.bg; x.fillRect(0, 0, W, H);
-  x.direction = 'rtl'; x.textBaseline = 'middle';
-  const text = (s, px, py, size, weight = 400, color = C.ink, align = 'right') => { x.font = `${weight} ${size}px Vazirmatn, sans-serif`; x.fillStyle = color; x.textAlign = align; x.fillText(s, px, py); };
-  let y = P + 20;
-  text('فاکتور جلسه‌های تمرین', W - P, y, 28, 600, C.muted); y += 58;
-  text(g.invoiceName || g.name, W - P, y, 48, 800);
-  text(jMonthsOf(v.rows), P, y, 30, 600, C.sage, 'left'); y += 60;
-  if (g.phone || g.address) { text([g.address, g.phone].filter(Boolean).join('، '), W - P, y, 26, 400, C.muted); y += 60; }
-  y += 20;
-  const cols = [W - P - 20, W - P - 150, W - P - 470, P + 20];
-  const head = ['جلسه', 'تاریخ', 'نوع', 'مبلغ (تومان)'];
-  x.fillStyle = C.sageSoft; x.beginPath(); x.roundRect(P, y, W - 2 * P, RH, 18); x.fill();
-  head.forEach((h, i) => text(h, cols[i], y + RH / 2, 26, 700, C.sage, i === 3 ? 'left' : 'right'));
-  y += RH;
-  v.rows.forEach((r, i) => {
-    if (i % 2) { x.fillStyle = C.fill; x.fillRect(P, y, W - 2 * P, RH); }
-    const col = r.done ? C.ink : C.muted;
-    text(fa(r.n), cols[0], y + RH / 2, 28, 700, col);
-    text(jFull(r.e.date), cols[1], y + RH / 2, 28, 400, col);
-    text(sessionKind(r.e), cols[2], y + RH / 2, 28, 400, col);
-    text(r.price != null ? money(r.price) : '—', cols[3], y + RH / 2, 28, 600, col, 'left');
-    y += RH;
-  });
-  x.strokeStyle = C.ink; x.lineWidth = 3; x.beginPath(); x.moveTo(P, y); x.lineTo(W - P, y); x.stroke();
-  text('جمع', cols[0], y + RH / 2 + 6, 32, 800);
-  text(money(v.total), cols[3], y + RH / 2 + 6, 36, 800, C.ink, 'left');
-  y += RH + 30;
-  const st = v.s.paid ? 'پرداخت شد' : 'در انتظار پرداخت';
-  x.font = '700 28px Vazirmatn, sans-serif'; const sw = x.measureText(st).width + 48;
-  x.fillStyle = v.s.paid ? C.sageSoft : C.burgSoft; x.beginPath(); x.roundRect(W - P - sw, y, sw, 56, 28); x.fill();
-  text(st, W - P - 24, y + 28, 28, 700, v.s.paid ? C.sage : C.burg); y += 90;
-  if (hasPay) {
-    if (pr.name) { text(pr.name, W / 2, y, 30, 700, C.ink, 'center'); y += 48; }
-    x.direction = 'ltr';
-    if (pr.card) { text(pr.card, W / 2, y, 32, 600, C.ink, 'center'); y += 48; }
-    if (pr.iban) { text(pr.iban, W / 2, y, 28, 400, C.muted, 'center'); y += 20; }
+  try { await Promise.all(['400 28px Vazirmatn', '600 28px Vazirmatn', '800 28px Vazirmatn'].map(f => document.fonts.load(f))); } catch { /* system font */ }
+  const x = invoiceParts(v), L = x.L, rtl = x.lang === 'fa';
+  const W = 1080, P = 84, RH = 82;
+  const c = document.createElement('canvas'); c.width = W; c.height = 900 + x.rows.length * RH;
+  const g = c.getContext('2d');
+  const C = { ink: '#1F2421', muted: '#7A7F79', sep: '#E7E7E2', sage: '#5E8A66' };
+  g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, W, c.height);
+  g.direction = rtl ? 'rtl' : 'ltr'; g.textBaseline = 'middle';
+  const at = off => rtl ? W - P - off : P + off, end = rtl ? P : W - P;
+  const text = (s, px, py, size, weight, color, align = 'start') => { g.font = `${weight} ${size}px Vazirmatn, sans-serif`; g.fillStyle = color; g.textAlign = align; g.fillText(s, px, py); };
+  const line = (py, w, color) => { g.strokeStyle = color; g.lineWidth = w; g.beginPath(); g.moveTo(P, py); g.lineTo(W - P, py); g.stroke(); };
+  let y = P + 10;
+  text(L.title, at(0), y, 26, 600, C.muted); y += 70;
+  text(x.name, at(0), y, 56, 800, C.ink); y += 62;
+  text(x.period, at(0), y, 30, 400, C.muted); y += 90;
+  const cols = [0, 90, 470];
+  [L.n, L.date, L.kind].forEach((h, i) => text(h, at(cols[i]), y, 24, 600, C.muted));
+  text(L.amount, end, y, 24, 600, C.muted, 'end');
+  y += 34; line(y, 2, C.sep);
+  for (const r of x.rows) {
+    const my = y + RH / 2, col = r.done ? C.ink : C.muted;
+    text(r.n, at(cols[0]), my, 26, 600, C.muted);
+    text(r.date, at(cols[1]), my, 30, 400, col);
+    text(r.kind, at(cols[2]), my, 28, 400, C.muted);
+    text(r.amount, end, my, 30, 600, col, 'end');
+    y += RH; line(y, 1, C.sep);
   }
-  // Trim the canvas to what was drawn.
+  y += 14; line(y, 3, C.ink); y += 56;
+  text(L.total, at(0), y, 34, 800, C.ink);
+  text(`${x.total} ${L.unit}`, end, y, 40, 800, C.ink, 'end');
+  if (x.paid) { y += 66; text(`${L.paid} ✓`, at(0), y, 30, 700, C.sage); }
+  if (x.card || x.iban) {
+    y += 90; line(y, 1, C.sep); y += 58;
+    if (x.payee) { text(`${L.to} ${x.payee}`, at(0), y, 28, 600, C.ink); y += 64; }
+    // Bank numbers always read left to right, in either language.
+    const num = (s, py, size, weight) => { g.direction = 'ltr'; text(s, at(0), py, size, weight, C.ink, rtl ? 'right' : 'left'); g.direction = rtl ? 'rtl' : 'ltr'; };
+    if (x.card) { text(L.card, at(0), y, 24, 400, C.muted); y += 50; num(x.card, y, 40, 700); y += 70; }
+    if (x.iban) { text(L.iban, at(0), y, 24, 400, C.muted); y += 46; num(x.iban, y, 30, 600); }
+  }
   const out = document.createElement('canvas'); out.width = W; out.height = Math.ceil(y + P);
   out.getContext('2d').drawImage(c, 0, 0);
   return new Promise(res => out.toBlob(res, 'image/png'));
+}
+
+// The invoice sheet previews the very image that will be sent.
+let invUrl;
+async function fillInvoicePreview(id) {
+  const img = $('#invImg'); if (!img) return;
+  const blob = await invoiceImage(invoiceOf(id));
+  if (invUrl) URL.revokeObjectURL(invUrl);
+  invUrl = URL.createObjectURL(blob);
+  if ($('#invImg')) $('#invImg').src = invUrl;
 }
 
 async function shareFile(blob, name) {
@@ -665,6 +686,7 @@ function renderSheet() {
   if (!state.sheet) return;
   const fn = SHEETS[state.sheet.kind];
   $('#sheet').innerHTML = fn(state.sheet);
+  if (state.sheet.kind === 'invoice') fillInvoicePreview(state.sheet.id);
 }
 
 // ---------- actions ----------
@@ -783,7 +805,7 @@ document.addEventListener('click', async ev => {
   if (act === 'prices') { openSheet('prices', { id: t.closest('[data-act]').dataset.id, back: s ? { ...s } : null }); return; }
   if (act === 'invoice') { openSheet('invoice', { id: t.closest('[data-act]').dataset.id }); return; }
   if (act === 'profile') { openSheet('profile', { back: s ? { ...s } : null }); return; }
-  if (act === 'inv-image') { const v = invoiceOf(t.closest('[data-act]').dataset.id); toast('در حال ساختن تصویر…'); await shareFile(await invoiceImage(v), `فاکتور ${v.g.invoiceName || v.g.name}.png`); return; }
+  if (act === 'inv-image') { const v = invoiceOf(t.closest('[data-act]').dataset.id); await shareFile(await invoiceImage(v), `${v.g.invoiceLang === 'en' ? 'Invoice' : 'فاکتور'} ${v.g.invoiceLang === 'en' ? (v.g.invoiceName || v.g.name) : v.g.name}.png`); return; }
   if (act === 'inv-text') { await copyText(invoiceText(invoiceOf(t.closest('[data-act]').dataset.id))); toast('متن فاکتور کپی شد'); return; }
 
   if (!s) return;
@@ -805,12 +827,14 @@ document.addEventListener('click', async ev => {
   }
   if (s.kind === 'profile' && act === 'save-profile') {
     const pr = profile();
-    Object.assign(pr, { name: $('#fPName').value.trim() || null, card: $('#fPCard').value.replace(/[^\d۰-۹ -]/g, '').trim() || null, iban: $('#fPIban').value.trim().toUpperCase() || null });
+    Object.assign(pr, { name: $('#fPName').value.trim() || null, nameEn: $('#fPNameEn').value.trim() || null, card: $('#fPCard').value.replace(/[^\d۰-۹ -]/g, '').trim() || null, iban: $('#fPIban').value.trim().toUpperCase() || null });
     await store.put(pr); toast('ذخیره شد');
     if (s.back) openSheet(s.back.kind, s.back); else closeSheet();
     return;
   }
   if (s.kind === 'invoice') {
+    const il = t.closest('[data-invlang]');
+    if (il) { const g = invoiceOf(s.id).g; g.invoiceLang = il.dataset.invlang; await store.put(g); renderSheet(); return; }
     const pd = t.closest('[data-paid]');
     if (pd) { const x = store.get(pd.dataset.paid); x.paid = !x.paid; await store.put(x); renderSheet(); await render(false); if (x.paid) island('پرداخت ثبت شد', store.get(x.groupId).name, '', 'دوره', 'تسویه شد'); return; }
   }
