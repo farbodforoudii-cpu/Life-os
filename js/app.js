@@ -1,13 +1,13 @@
 import { requestPersistence } from './db.js';
 import { store } from './store.js';
 import { sync } from './sync.js';
-import { faDigits, WEEKDAYS, MONTHS, toJalali } from './jalali.js';
+import { faDigits, WEEKDAYS, MONTHS, toJalali, shiftMonth, monthLabel } from './jalali.js';
 import {
   CATS, CANCEL_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
+  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -214,7 +214,7 @@ function report() {
   const days = [...new Set(all.map(e => e.date))].sort(), cum = [];
   let acc = 0; for (const k of days) { acc += done.filter(e => e.date === k && (e.cat === 'client' || e.cat === 'shift')).reduce((s2, e) => s2 + minutesOf(e) / 60, 0); cum.push(acc); }
   const bars = Array.from({ length: 11 }, (_, i) => cum.length ? cum[Math.round(i * (cum.length - 1) / 10)] : 0), bmx = Math.max(1, ...bars);
-  return head + `<div class="sb stagger">
+  return head + (state.reportRange === 'month' ? workMoneyCard(monthKeyOf(tk)) : '') + `<div class="sb stagger">
       <div class="sb-main"><div class="hatch"></div><span class="sb-pill"><i class="pulse"></i>جلسهٔ مراجع</span><div class="num" data-count="${cnt('client')}">۰</div><p>${fh(hours('client'))} ساعت جلسه${perGroup.length ? ` با ${fa(perGroup.length)} مراجع` : ''}.</p></div>
       <div class="sb-wide"><div><h3>ساعت کار</h3><div class="num sm" data-count="${Math.round(hours('client') + hours('shift'))}">۰</div><small>جلسه + شیفت، روز به روز</small></div>
         <div class="sb-bars">${bars.map((v, i) => `<i style="height:${Math.max(8, v / bmx * 100).toFixed(0)}%;animation-delay:${(.25 + i * .04).toFixed(2)}s"></i>`).join('')}</div></div>
@@ -234,6 +234,34 @@ function report() {
       <div class="w"><h3>رفت‌وآمدها و کارهای شخصی</h3>
         ${places.length ? `<div class="chips">${places.map(([t, n]) => `<span class="chip" style="min-height:34px;padding:6px 12px;font-size:13px">${esc(t)}، ${fa(n)}</span>`).join('')}</div>` : '<div class="note">—</div>'}</div>
     </div>`;
+}
+
+// ---------- shared monthly report: hours from here, income from «حساب من» ----------
+const short = n => n >= 1e6 ? `${fa(Math.round(n / 1e5) / 10).replace('.', '٫')} میلیون` : n >= 1e3 ? `${fa(Math.round(n / 1e3))} هزار` : fa(Math.round(n));
+const hrs = min => '⁦' + fa(Math.round(min / 6) / 10).replace('.', '٫') + '⁩';
+function workMoneyCard(k) {
+  const all = monthStats(), m = all[k] || { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0 };
+  const money = store.get(`money_${k}`), st = store.get('life_status');
+  // A month counts once it has 20 work hours; a month that has only begun would give a misleading rate.
+  const perHour = (mm, mo) => mo && mm && mm.workMin >= 20 * 60 ? mo.work / (mm.workMin / 60) : null;
+  const rate = perHour(m, money);
+  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(k, i - 5));
+  const pts = months.map(x => ({ k: x, v: perHour(all[x], store.get(`money_${x}`)) }));
+  const top = Math.max(1, ...pts.map(p => p.v || 0));
+  const name = x => monthLabel(x).split(' ')[0];
+  return `<div class="card wm stagger">
+    <div class="wm-head"><b>کار و درآمد ${monthLabel(k)}</b><span class="eyebrow">با «حساب من»</span></div>
+    <div class="wm-grid">
+      <div><span>ساعت کار</span><b>${m.estMin ? '≈' : ''}${hrs(m.workMin)} ساعت</b><em>جلسه ${hrs(m.clientMin)} + شیفت ${hrs(m.shiftMin)}</em></div>
+      <div><span>جلسه و شیفت</span><b>${fa(m.sessions)} جلسه، ${fa(m.shifts)} شیفت</b><em>برگزارشده تا امروز</em></div>
+      <div><span>ارزش جلسه‌ها</span><b>${short(m.earned)} تومان</b><em>مجموع مبلغ جلسه‌های برگزارشده${m.unpriced ? `؛ ${fa(m.unpriced)} جلسه بدون قیمت` : ''}</em></div>
+      <div><span>دریافتی کاری</span><b>${money ? `${short(money.work)} تومان` : '—'}</b><em>${money ? 'از «حساب من»، با پول دیررسیدهٔ همین ماه' : '«حساب من» هنوز خلاصهٔ این ماه را نفرستاده'}</em></div>
+      <div class="wm-rate"><span>درآمد هر ساعت کار</span><b>${rate != null ? `${short(rate)} تومان` : '—'}</b><em>${rate != null ? `= دریافتی کاری ${short(money.work)} ÷ ${hrs(m.workMin)} ساعت کار` : money ? 'دریافتی کاری ÷ ساعت کار؛ پس از ۲۰ ساعت کار در ماه حساب می‌شود' : 'دریافتی کاری ÷ ساعت کار'}</em></div>
+      <div><span>طلب باز</span><b>${st ? `${short(st.open)} تومان` : '—'}</b><em>${st ? `${fa(st.openSessions)} جلسهٔ برگزارشده که هنوز پرداخت نشده` : ''}</em></div>
+    </div>
+    <div class="wm-trend" role="img" aria-label="درآمد هر ساعت کار در شش ماه اخیر">${pts.map((p, i) => `<div class="wm-bar ${p.k === k ? 'on' : ''}"><small>${p.v ? short(p.v) : '—'}</small><i style="height:${p.v ? Math.max(6, p.v / top * 100).toFixed(0) : 0}%;animation-delay:${(.2 + i * .06).toFixed(2)}s"></i><span>${name(p.k)}</span></div>`).join('')}</div>
+    <p class="hint">ستون‌ها: درآمد هر ساعت کار در شش ماه اخیر (دریافتی کاری همان ماه ÷ ساعت جلسه و شیفت همان ماه).${m.estMin ? ' ساعت‌های تخمینی سوابق قدیمی با «≈» آمده‌اند.' : ''}</p>
+  </div>`;
 }
 
 // The range told as short news; every number says where it comes from.

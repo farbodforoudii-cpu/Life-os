@@ -231,6 +231,38 @@ const periodOf = rows => {
   const ms = [...new Set(rows.map(r => jMonthYear(fromDayKey(r.e.date))))];
   return ms.length > 1 ? `${ms[0].split(' ')[0]}–${ms[ms.length - 1]}` : ms[0] || '';
 };
+// ---------- shared monthly report ----------
+// Each app publishes a summary of its own month: this one `month_<YYYY-MM>` (hours, sessions, value of the sessions
+// held), «حساب من» `money_<YYYY-MM>` (work income received). Both apps show the same card from the two.
+export const monthKeyOf = k => { const j = toJalali(fromDayKey(k)); return `${j.jy}-${String(j.jm).padStart(2, '0')}`; };
+const MONTH_KEYS = ['workMin', 'clientMin', 'shiftMin', 'estMin', 'sessions', 'shifts', 'earned', 'unpriced'];
+export function monthStats(now = new Date()) {
+  const out = {};
+  for (const e of store.all('entry')) {
+    if (!isActive(e) || (e.cat !== 'client' && e.cat !== 'shift')) continue;
+    const st = liveStatus(e, now);
+    if (st !== 'done' && st !== 'now') continue;
+    const k = monthKeyOf(e.date), m = out[k] || (out[k] = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0 });
+    const min = minutesOf(e);
+    m.workMin += min; if (e.estimated) m.estMin += min;
+    if (e.cat === 'client') { m.clientMin += min; m.sessions++; const p = priceOf(e); if (p == null) m.unpriced++; else m.earned += p; }
+    else { m.shiftMin += min; m.shifts++; }
+  }
+  return out;
+}
+function monthRows(now) {
+  const rows = [];
+  for (const [k, m] of Object.entries(monthStats(now))) {
+    const id = `month_${k}`, old = store.get(id);
+    if (old && MONTH_KEYS.every(f => old[f] === m[f])) continue;
+    rows.push({ ...(old || { id, kind: 'monthsum', month: k }), ...m });
+  }
+  const open = awaitingPayment(now), st = { open: open.reduce((s, e) => s + (priceOf(e) || 0), 0), openSessions: open.length };
+  const old = store.get('life_status');
+  if (!old || old.open !== st.open || old.openSessions !== st.openSessions) rows.push({ ...(old || { id: 'life_status', kind: 'lifestatus' }), ...st });
+  return rows;
+}
+
 let billing = false;
 export async function refreshBills(now = new Date()) {
   if (billing) return;
@@ -255,6 +287,7 @@ export async function refreshBills(now = new Date()) {
       bills.push({ ...(old || { id, kind: 'bill', seriesId: s.id, issuedAt: now.toISOString() }), ...want });
     }
     for (const b of store.all('bill')) if (!store.get(b.seriesId)) { b.deleted = true; bills.push(b); }
+    bills.push(...monthRows(now));
     if (bills.length) await store.put(...bills);
   } finally {
     billing = false;

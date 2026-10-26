@@ -83,6 +83,6 @@ them into one PWA (which the iOS storage limit would otherwise require).
   packages become `bill_<series>` rows that hesab-man shows in an inbox, its one-tap answer `pay_<series>` marks the
   package paid (format: hesab-man `docs/ECOSYSTEM.md` §1).
 - Money is never recorded silently: hesab-man records income only on the user's tap.
-- Next: (d) a shared monthly report (hours, sessions, income, income per hour, open receivables); expense context
-  (which session or place a payment happened around) from life-os entries.
+- Done 1405/08/04: (d) shared monthly report «کار و درآمد» in both apps from `month_*` (life) and `money_*` (hesab) rows.
+- Next: expense context (which session or place a payment happened around) from life-os entries.
 - Details of the sync format: hesab-man `docs/ECOSYSTEM.md`.
