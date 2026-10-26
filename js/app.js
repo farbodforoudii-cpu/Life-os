@@ -1,7 +1,7 @@
 import { requestPersistence } from './db.js';
 import { store } from './store.js';
 import { sync } from './sync.js';
-import { faDigits, WEEKDAYS, MONTHS, toJalali, shiftMonth, monthLabel } from './jalali.js';
+import { faDigits, WEEKDAYS, MONTHS, toJalali, shiftMonth, monthLabel, monthRange } from './jalali.js';
 import {
   CATS, CANCEL_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
@@ -13,7 +13,7 @@ import {
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fa = faDigits;
-const state = { tab: 0, dayOff: 0, weekOff: 0, reportRange: 'month', lastNew: null, sheet: null };
+const state = { tab: 0, dayOff: 0, weekOff: 0, reportMode: 'month', reportOff: 0, lastNew: null, sheet: null };
 const TABS = ['امروز', 'هفته', 'مراجع‌ها', 'گزارش'];
 const ICONS = [
   '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -180,107 +180,120 @@ function clients() {
     ${readyH}${list.length ? `<div class="cl-grid stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}`;
 }
 
-function report() {
-  const now = new Date(), tk = dayKey(now);
-  let from, title;
-  if (state.reportRange === 'week') { from = dayKey(weekStart(now)); title = 'این هفته'; }
-  else if (state.reportRange === 'month') { const j = jMonthYear(now); from = null; title = j; }
-  else { from = null; title = 'امسال'; }
-  const inRange = e => {
-    if (e.date > tk) return false;
-    if (state.reportRange === 'week') return e.date >= from;
-    if (state.reportRange === 'month') return jMonthYear(fromDayKey(e.date)) === title;
-    return jMonthYear(fromDayKey(e.date)).split(' ')[1] === jMonthYear(now).split(' ')[1];
-  };
-  const all = store.all('entry').filter(inRange);
-  const done = all.filter(e => liveStatus(e, now) === 'done' || liveStatus(e, now) === 'now');
-  const cancelled = all.filter(e => e.status === 'cancelled');
-  const cnt = c => done.filter(e => e.cat === c).length;
-  const hours = c => done.filter(e => e.cat === c).reduce((s, e) => s + minutesOf(e), 0) / 60;
-  const fh = h => '\u2066' + fa(Math.round(h * 10) / 10).replace('.', '٫') + '\u2069';
-  const shiftTitles = [...new Set(done.filter(e => e.cat === 'shift').map(e => e.title))];
-  const perShift = shiftTitles.map(t => { const xs = done.filter(e => e.cat === 'shift' && e.title === t); const known = xs.filter(e => e.headcount != null), ppl = known.reduce((s, e) => s + e.headcount, 0); return { t, n: xs.length, k: known.length, ppl }; });
-  const perGroup = groups().map(g => ({ g, n: done.filter(e => e.groupId === g.id).length, c: cancelled.filter(e => e.groupId === g.id).length })).filter(x => x.n || x.c);
-  const places = [...done.filter(e => e.cat === 'personal').reduce((m, e) => m.set(e.title, (m.get(e.title) || 0) + 1), new Map())].sort((a, b) => b[1] - a[1]).slice(0, 8);
-  const seg = `<div class="seg">${[['week', 'هفته'], ['month', 'ماه'], ['year', 'سال']].map(([v, l]) => `<button class="${state.reportRange === v ? 'on' : ''}" data-range="${v}">${l}</button>`).join('')}</div>`;
-  const head = `<div class="head"><div><div class="eyebrow">تا امروز</div><h1 class="big">گزارش ${title}</h1></div>${seg}</div>`;
-  if (!all.length) return head + empty('هنوز داده‌ای برای این بازه نیست', 'گزارش فقط از ثبت‌های واقعی ساخته می‌شود.');
-  const cats = Object.keys(CATS);
-  const totalH = cats.reduce((s, c) => s + hours(c), 0);
-  const estH = done.filter(e => e.estimated).reduce((s, e) => s + minutesOf(e), 0) / 60, untimedN = done.filter(e => e.untimed).length;
-  const N = reportNews(done, cancelled, all, perGroup, hours, fh);
-  // Stats bento: one big number with a hatched corner, a wide tile with the range growing day by day,
-  // then three small counts.
-  const days = [...new Set(all.map(e => e.date))].sort(), cum = [];
-  let acc = 0; for (const k of days) { acc += done.filter(e => e.date === k && (e.cat === 'client' || e.cat === 'shift')).reduce((s2, e) => s2 + minutesOf(e) / 60, 0); cum.push(acc); }
-  const bars = Array.from({ length: 11 }, (_, i) => cum.length ? cum[Math.round(i * (cum.length - 1) / 10)] : 0), bmx = Math.max(1, ...bars);
-  return head + (state.reportRange === 'month' ? workMoneyCard(monthKeyOf(tk)) : '') + `<div class="sb stagger">
-      <div class="sb-main"><div class="hatch"></div><span class="sb-pill"><i class="pulse"></i>جلسهٔ مراجع</span><div class="num" data-count="${cnt('client')}">۰</div><p>${fh(hours('client'))} ساعت جلسه${perGroup.length ? ` با ${fa(perGroup.length)} مراجع` : ''}.</p></div>
-      <div class="sb-wide"><div><h3>ساعت کار</h3><div class="num sm" data-count="${Math.round(hours('client') + hours('shift'))}">۰</div><small>جلسه + شیفت، روز به روز</small></div>
-        <div class="sb-bars">${bars.map((v, i) => `<i style="height:${Math.max(8, v / bmx * 100).toFixed(0)}%;animation-delay:${(.25 + i * .04).toFixed(2)}s"></i>`).join('')}</div></div>
-      <div class="sb-s"><div class="num sm" data-count="${cnt('shift')}">۰</div><h3>شیفت</h3></div>
-      <div class="sb-s"><div class="num sm" data-count="${cnt('uni')}">۰</div><h3>کلاس</h3></div>
-      <div class="sb-s"><div class="num sm burg" data-count="${cancelled.length}">۰</div><h3>لغو</h3></div></div>
-    ${N.length ? `<div class="eyebrow" style="margin:20px 2px 10px">خبرهای این بازه</div><div class="feed stagger">${N.map(x => `<div class="news"><span class="news-k ${x.tone || ''}">${x.k}</span><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>` : ''}
-    <div class="grid2">
-      <div class="w"><h3>زمان کجا رفت</h3>
-        <div class="stack" role="img" aria-label="${cats.map(c => `${CATS[c]} ${fh(hours(c))} ساعت`).join('، ')}">${cats.filter(c => hours(c) > 0).map((c, i) => `<div title="${CATS[c]}، ${fh(hours(c))} ساعت" style="flex:${hours(c)};background:var(--c-${c});animation-delay:${i * .1}s"></div>`).join('')}</div>
-        <div class="lg2" style="margin-top:6px">${cats.map(c => `<span><i style="background:var(--c-${c})"></i>${CATS[c]}<b>${fh(hours(c))} ساعت</b></span>`).join('')}</div>
-        <div class="note">مجموع ${fh(totalH)} ساعت ثبت‌شده${estH ? `؛ ${fh(estH)} ساعت آن تخمینی است (ساعت معمول همان جلسه یا شیفت)` : ''}${untimedN ? `. ${fa(untimedN)} مورد بدون ساعت در این جمع نیامده است` : ''}</div></div>
-      <div class="w"><h3>جلسه‌ها به تفکیک مراجع</h3>
-        ${perGroup.length ? perGroup.slice().sort((x, y) => y.n - x.n).map((x, i, arr) => `<div class="act"><div class="act-top"><span>${esc(x.g.name)}</span><b>${fa(x.n)}${x.c ? `<em>، ${fa(x.c)} لغو</em>` : ''}</b></div><div class="act-bar"><i style="width:${(x.n / Math.max(1, arr[0].n) * 100).toFixed(0)}%;animation-delay:${(.3 + i * .07).toFixed(2)}s"></i></div></div>`).join('') : '<div class="note">—</div>'}</div>
-      <div class="w"><h3>شاگردهای شیفت‌ها</h3>
-        ${perShift.length ? perShift.map(x => `<div class="rrow"><span>${esc(x.t)}</span><b>${x.k ? `${fa(x.ppl)} نفر` : '—'}</b><em>${fa(x.n)} شیفت${x.k ? `، میانگین ${fa(Math.round(x.ppl / x.k * 10) / 10).replace('.', '٫')} (از ${fa(x.k)} شیفت با تعداد ثبت‌شده)` : '، تعداد شاگردها ثبت نشده'}</em></div>`).join('') : '<div class="note">—</div>'}</div>
-      <div class="w"><h3>رفت‌وآمدها و کارهای شخصی</h3>
-        ${places.length ? `<div class="chips">${places.map(([t, n]) => `<span class="chip" style="min-height:34px;padding:6px 12px;font-size:13px">${esc(t)}، ${fa(n)}</span>`).join('')}</div>` : '<div class="note">—</div>'}</div>
-    </div>`;
-}
-
-// ---------- shared monthly report: hours from here, income from «حساب من» ----------
-const short = n => n >= 1e6 ? `${fa(Math.round(n / 1e5) / 10).replace('.', '٫')} میلیون` : n >= 1e3 ? `${fa(Math.round(n / 1e3))} هزار` : fa(Math.round(n));
+// ---------- report ----------
+// Read top to bottom: one sentence of what happened, three numbers with the same point of the period before,
+// then the trend period by period, then who and where. Month or week; ‹ › walks back in time.
+const short = n => n >= 1e6 ? `⁦${fa(Math.round(n / 1e5) / 10).replace('.', '٫')}⁩ میلیون` : n >= 1e3 ? `⁦${fa(Math.round(n / 1e3))}⁩ هزار` : `⁦${fa(Math.round(n))}⁩`;
 const hrs = min => '⁦' + fa(Math.round(min / 6) / 10).replace('.', '٫') + '⁩';
-function workMoneyCard(k) {
-  const all = monthStats(), m = all[k] || { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0 };
-  const money = store.get(`money_${k}`), st = store.get('life_status');
-  // A month counts once it has 20 work hours; a month that has only begun would give a misleading rate.
-  const perHour = (mm, mo) => mo && mm && mm.workMin >= 20 * 60 ? mo.work / (mm.workMin / 60) : null;
-  const rate = perHour(m, money);
-  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(k, i - 5));
-  const pts = months.map(x => ({ k: x, v: perHour(all[x], store.get(`money_${x}`)) }));
-  const top = Math.max(1, ...pts.map(p => p.v || 0));
-  const name = x => monthLabel(x).split(' ')[0];
-  return `<div class="card wm stagger">
-    <div class="wm-head"><b>کار و درآمد ${monthLabel(k)}</b><span class="eyebrow">با «حساب من»</span></div>
-    <div class="wm-grid">
-      <div><span>ساعت کار</span><b>${m.estMin ? '≈' : ''}${hrs(m.workMin)} ساعت</b><em>جلسه ${hrs(m.clientMin)} + شیفت ${hrs(m.shiftMin)}</em></div>
-      <div><span>جلسه و شیفت</span><b>${fa(m.sessions)} جلسه، ${fa(m.shifts)} شیفت</b><em>برگزارشده تا امروز</em></div>
-      <div><span>ارزش جلسه‌ها</span><b>${short(m.earned)} تومان</b><em>مجموع مبلغ جلسه‌های برگزارشده${m.unpriced ? `؛ ${fa(m.unpriced)} جلسه بدون قیمت` : ''}</em></div>
-      <div><span>دریافتی کاری</span><b>${money ? `${short(money.work)} تومان` : '—'}</b><em>${money ? 'از «حساب من»، با پول دیررسیدهٔ همین ماه' : '«حساب من» هنوز خلاصهٔ این ماه را نفرستاده'}</em></div>
-      <div class="wm-rate"><span>درآمد هر ساعت کار</span><b>${rate != null ? `${short(rate)} تومان` : '—'}</b><em>${rate != null ? `= دریافتی کاری ${short(money.work)} ÷ ${hrs(m.workMin)} ساعت کار` : money ? 'دریافتی کاری ÷ ساعت کار؛ پس از ۲۰ ساعت کار در ماه حساب می‌شود' : 'دریافتی کاری ÷ ساعت کار'}</em></div>
-      <div><span>طلب باز</span><b>${st ? `${short(st.open)} تومان` : '—'}</b><em>${st ? `${fa(st.openSessions)} جلسهٔ برگزارشده که هنوز پرداخت نشده` : ''}</em></div>
-    </div>
-    <div class="wm-trend" role="img" aria-label="درآمد هر ساعت کار در شش ماه اخیر">${pts.map((p, i) => `<div class="wm-bar ${p.k === k ? 'on' : ''}"><small>${p.v ? short(p.v) : '—'}</small><i style="height:${p.v ? Math.max(6, p.v / top * 100).toFixed(0) : 0}%;animation-delay:${(.2 + i * .06).toFixed(2)}s"></i><span>${name(p.k)}</span></div>`).join('')}</div>
-    <p class="hint">ستون‌ها: درآمد هر ساعت کار در شش ماه اخیر (دریافتی کاری همان ماه ÷ ساعت جلسه و شیفت همان ماه).${m.estMin ? ' ساعت‌های تخمینی سوابق قدیمی با «≈» آمده‌اند.' : ''}</p>
-  </div>`;
+
+// A period: its first day, the day after it, how many days it has, and its name.
+function period(mode, off, now = new Date()) {
+  if (mode === 'week') {
+    const s = addDays(weekStart(now), off * 7);
+    return { key: dayKey(s), from: s, to: addDays(s, 7), days: 7, name: off === 0 ? 'این هفته' : off === -1 ? 'هفتهٔ قبل' : `هفتهٔ ${jDayMonth(s)}`, short: jDayMonth(s) };
+  }
+  const k = shiftMonth(monthKeyOf(dayKey(now)), off), { start, end } = monthRange(k);
+  return { key: k, from: start, to: end, days: Math.round((end - start) / 864e5), name: monthLabel(k), short: monthLabel(k).split(' ')[0] };
 }
 
-// The range told as short news; every number says where it comes from.
-function reportNews(done, cancelled, all, perGroup, hours, fh) {
-  const N = [], wait = awaitingPayment().sort((a, b) => a.date.localeCompare(b.date));
-  if (wait.length) {
-    const sum = wait.reduce((s, e) => s + (priceOf(e) || 0), 0), noPrice = wait.filter(e => priceOf(e) == null).length;
-    N.push({ k: 'پرداخت', t: `${fa(wait.length)} جلسه منتظر پرداخت${sum ? `، ${num(sum)} تومان` : ''}`, d: `${sum ? `جمع مبلغ این جلسه‌ها${noPrice ? `؛ ${fa(noPrice)} جلسه قیمت ندارد` : ''}. ` : ''}قدیمی‌ترین: ${wait[0].title}، ${jFull(wait[0].date)}.`, tone: 'r' });
+// Everything that counts, inside [from, upTo) and not after now.
+function periodStats(from, upTo, now = new Date()) {
+  const a = dayKey(from), b = dayKey(upTo), s = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0, cancelled: 0, groups: new Map(), shiftsBy: new Map() };
+  for (const e of store.all('entry')) {
+    if (e.date < a || e.date >= b) continue;
+    if (e.status === 'cancelled' && (e.cat === 'client' || e.cat === 'shift')) { s.cancelled++; continue; }
+    if (!isActive(e) || (e.cat !== 'client' && e.cat !== 'shift')) continue;
+    const st = liveStatus(e, now);
+    if (st !== 'done' && st !== 'now') continue;
+    const min = minutesOf(e);
+    s.workMin += min; if (e.estimated) s.estMin += min;
+    if (e.cat === 'client') {
+      s.clientMin += min; s.sessions++;
+      const p = priceOf(e); if (p == null) s.unpriced++; else s.earned += p;
+      const key = e.groupId || e.title, g = s.groups.get(key) || { name: e.groupId ? store.get(e.groupId)?.name || e.title : e.title, n: 0, value: 0, unpaid: 0 };
+      g.n++; g.value += p || 0; if (!isPaid(e)) g.unpaid++; s.groups.set(key, g);
+    } else {
+      s.shiftMin += min; s.shifts++;
+      const x = s.shiftsBy.get(e.title) || { n: 0, min: 0, ppl: 0, known: 0 };
+      x.n++; x.min += min; if (e.headcount != null) { x.ppl += e.headcount; x.known++; } s.shiftsBy.set(e.title, x);
+    }
   }
-  else if (done.some(e => e.cat === 'client')) N.push({ k: 'پرداخت', t: 'همهٔ جلسه‌ها تسویه شده', d: 'هیچ جلسهٔ تمام‌شده‌ای منتظر پرداخت نیست.', tone: 'g' });
-  const top = perGroup.slice().sort((a, b) => b.n - a.n)[0];
-  if (top && perGroup.length > 1) N.push({ k: 'مراجع', t: `${top.g.name}، بیشترین جلسه با ${fa(top.n)} بار`, d: `از ${fa(perGroup.length)} مراجع در این بازه.` });
-  const wd = new Map(); for (const e of done.filter(e => e.cat === 'client' || e.cat === 'shift')) { const w = weekdayName(fromDayKey(e.date)); wd.set(w, (wd.get(w) || 0) + minutesOf(e) / 60); }
-  const busy = [...wd].sort((a, b) => b[1] - a[1])[0];
-  if (busy && wd.size > 1) N.push({ k: 'زمان', t: `پرکارترین روز: ${busy[0]}‌ها`, d: `جمعاً ${fh(busy[1])} ساعت جلسه و شیفت.` });
-  const work = hours('client') + hours('shift'), pers = hours('personal');
-  if (work) N.push({ k: 'تعادل', t: `${fh(pers)} ساعت برای خودت`, d: `در برابر ${fh(work)} ساعت کار (جلسه + شیفت).${done.some(e => e.untimed && e.cat === 'personal') ? ` ${fa(done.filter(e => e.untimed && e.cat === 'personal').length)} کار شخصی بدون ساعت در این جمع نیامده است.` : ''}` });
-  if (cancelled.length >= 2) N.push({ k: 'لغو', t: `${fa(cancelled.length)} لغو`, d: `${fa(Math.round(cancelled.length / all.length * 100))}٪ برنامه‌ها = لغو ÷ همهٔ برنامه‌های این بازه.`, tone: 'r' });
-  return N;
+  return s;
+}
+
+// «↑ ۳» / «↓ ۲» / «همان» against the earlier figure.
+function delta(now, before, fmt) {
+  const d = now - before;
+  if (Math.abs(d) < 1e-9) return '<span class="dl">همان</span>';
+  return `<span class="dl ${d > 0 ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'} ${fmt(Math.abs(d))}</span>`;
+}
+
+function report() {
+  const now = new Date(), mode = state.reportMode || 'month', off = state.reportOff || 0;
+  const P = period(mode, off, now), Q = period(mode, off - 1, now);
+  const running = now >= P.from && now < P.to;
+  // Elapsed days of a running period; the period before is cut at the same point so the comparison is fair.
+  const elapsed = running ? Math.floor((fromDayKey(dayKey(now)) - P.from) / 864e5) + 1 : P.days;
+  const S = periodStats(P.from, P.to, now);
+  const Qcut = running ? addDays(Q.from, Math.min(elapsed, Q.days)) : Q.to;
+  const R = periodStats(Q.from, Qcut, now);
+  const unit = mode === 'week' ? 'هفته' : 'ماه';
+  const same = running ? (mode === 'week' ? `${Q.name} تا ${weekdayName(addDays(Q.from, elapsed - 1))}` : `۱ تا ${fa(Math.min(elapsed, Q.days))} ${Q.short}`) : Q.name;
+
+  const seg = `<div class="seg">${[['month', 'ماه'], ['week', 'هفته']].map(([v, l]) => `<button class="${mode === v ? 'on' : ''}" data-rmode="${v}">${l}</button>`).join('')}</div>`;
+  const nav = `<div class="rnav"><button data-roff="-1" aria-label="${unit} قبل">→</button><b>${P.name}</b><button data-roff="1" ${off >= 0 ? 'disabled' : ''} aria-label="${unit} بعد">←</button></div>`;
+  const head = `<div class="head"><div><div class="eyebrow">${running ? `تا امروز، روز ${fa(elapsed)} از ${fa(P.days)}` : 'کامل'}</div><h1 class="big">گزارش</h1></div>${seg}</div>${nav}`;
+
+  // 1) The period in one sentence.
+  const diffH = (S.workMin - R.workMin) / 60;
+  const story = S.workMin || S.sessions
+    ? `${P.name}${running ? ' تا امروز' : ''}: ${hrs(S.workMin)} ساعت کار، ${fa(S.sessions)} جلسهٔ مراجع و ${fa(S.shifts)} شیفت. ${R.workMin ? `نسبت به ${same}، ${Math.abs(diffH) < .5 ? 'تقریباً همان‌قدر کار کرده‌ای' : `${hrs(Math.abs(diffH) * 60)} ساعت ${diffH > 0 ? 'بیشتر' : 'کمتر'}`}.` : ''}`
+    : `${P.name} هنوز جلسه یا شیفتی ثبت نشده است.`;
+
+  // 2) Three numbers, each with the same point of the period before.
+  const tile = (label, val, unitTxt, cmp, note) => `<div class="rt"><span>${label}</span><b>${val}<small>${unitTxt}</small></b>${cmp}<em>${note}</em></div>`;
+  const tiles = `<div class="rtiles stagger">
+    ${tile('ساعت کار', `${S.estMin ? '≈' : ''}${hrs(S.workMin)}`, 'ساعت', delta(S.workMin / 60, R.workMin / 60, v => `${hrs(v * 60)} ساعت`), `جلسه ${hrs(S.clientMin)} + شیفت ${hrs(S.shiftMin)}`)}
+    ${tile('جلسهٔ مراجع', fa(S.sessions), 'جلسه', delta(S.sessions, R.sessions, v => `${fa(v)} جلسه`), `${fa(S.shifts)} شیفت${S.cancelled ? `، ${fa(S.cancelled)} لغو` : ''}`)}
+    ${tile('درآمد جلسه‌ها', S.earned >= 1e6 ? `\u2066${fa(Math.round(S.earned / 1e5) / 10).replace('.', '٫')}\u2069` : short(S.earned), S.earned >= 1e6 ? 'میلیون تومان' : 'تومان', delta(S.earned, R.earned, v => short(v)), `مجموع مبلغ جلسه‌های برگزارشده${S.unpriced ? `؛ ${fa(S.unpriced)} جلسه بدون قیمت` : ''}`)}
+  </div><p class="rhint">کنار هر عدد: تفاوت با ${same}.</p>`;
+
+  // 3) The trend: the last 8 periods, hours (sessions + shifts) and income, each with one sentence that reads it.
+  const N = 8, list = Array.from({ length: N }, (_, i) => period(mode, off - (N - 1) + i, now)).map(p => ({ p, s: periodStats(p.from, p.to, now) }));
+  const full = list.filter(x => !(now >= x.p.from && now < x.p.to) && x.s.workMin > 0);
+  const avgH = full.length ? full.reduce((a, x) => a + x.s.workMin, 0) / full.length / 60 : 0;
+  const avgE = full.length ? full.reduce((a, x) => a + x.s.earned, 0) / full.length : 0;
+  const paceH = running && elapsed ? S.workMin / 60 / elapsed * P.days : null;
+  const paceE = running && elapsed ? S.earned / elapsed * P.days : null;
+  const maxH = Math.max(1, ...list.map(x => x.s.workMin / 60), paceH || 0), maxE = Math.max(1, ...list.map(x => x.s.earned), paceE || 0);
+  const bars = (val, max, fmt, extra) => `<div class="rchart">${list.map((x, i) => {
+    const v = val(x.s), on = x.p.key === P.key, live = now >= x.p.from && now < x.p.to;
+    return `<div class="rcol ${on ? 'on' : ''} ${live ? 'live' : ''}"><small>${v ? fmt(v) : '—'}</small><div class="rbar" style="animation-delay:${(.15 + i * .05).toFixed(2)}s">${extra(x, max)}</div><span>${x.p.short}</span></div>`;
+  }).join('')}</div>`;
+  const hoursBars = bars(s => s.workMin / 60, maxH, v => fa(Math.round(v)), (x, max) =>
+    `<i class="c" style="height:${(x.s.clientMin / 60 / max * 100).toFixed(1)}%"></i><i class="s" style="height:${(x.s.shiftMin / 60 / max * 100).toFixed(1)}%"></i>`);
+  const moneyBars = bars(s => s.earned, maxE, v => fa(Math.round(v / 1e6)), (x, max) => `<i class="m" style="height:${(x.s.earned / max * 100).toFixed(1)}%"></i>`);
+  const best = list.reduce((a, x) => x.s.workMin > (a?.s.workMin || 0) ? x : a, null);
+  const readH = !full.length ? '' : `میانگین ${fa(full.length)} ${unit} کامل اخیر: ${hrs(avgH * 60)} ساعت. ${best ? `بیشترین: ${best.p.name} با ${hrs(best.s.workMin)} ساعت. ` : ''}${paceH != null ? `اگر به همین روال ادامه دهی، ${P.name} حدود ${hrs(paceH * 60)} ساعت می‌شود (= ${hrs(S.workMin)} ساعت تا امروز ÷ ${fa(elapsed)} روز × ${fa(P.days)} روز).` : ''}`;
+  const readE = !full.length ? '' : `میانگین ${unit}‌های کامل: ${short(avgE)} تومان.${paceE != null ? ` با همین روال، ${P.name} حدود ${short(paceE)} تومان می‌شود (همان حساب بالا).` : ''} درآمد هر ساعت جلسه: ${S.clientMin ? `${short(S.earned / (S.clientMin / 60))} تومان (= درآمد جلسه‌ها ÷ ${hrs(S.clientMin)} ساعت جلسه)` : '—'}.`;
+  const trend = `<div class="card rcard"><h3>ساعت کار، ${unit} به ${unit} <small>(عدد بالای ستون: ساعت)</small></h3>${hoursBars}
+      <div class="rleg"><span><i style="background:var(--c-client)"></i>جلسهٔ مراجع</span><span><i style="background:var(--c-shift)"></i>شیفت</span></div><p class="rread">${readH}</p></div>
+    <div class="card rcard"><h3>درآمد جلسه‌ها، ${unit} به ${unit} <small>(عدد بالای ستون: میلیون تومان)</small></h3>${moneyBars}<p class="rread">${readE}</p></div>`;
+
+  // 4) Who: clients of this period; shifts with their students; what is still owed.
+  const gl = [...S.groups.values()].sort((a, b) => b.n - a.n), gmax = Math.max(1, ...gl.map(g => g.n));
+  const clientsH = gl.length ? gl.map(g => `<div class="rrow2"><div class="rr-top"><b>${esc(g.name)}</b><span>${fa(g.n)} جلسه${g.value ? `، ${short(g.value)} تومان` : ''}</span></div><div class="rr-bar"><i style="width:${(g.n / gmax * 100).toFixed(0)}%"></i></div>${g.unpaid ? `<em class="unpaid">${fa(g.unpaid)} جلسه پرداخت نشده</em>` : ''}</div>`).join('') : '<p class="rhint">جلسه‌ای در این بازه نیست.</p>';
+  const sl = [...S.shiftsBy.entries()];
+  const shiftsH = sl.length ? sl.map(([t, x]) => `<div class="rrow2"><div class="rr-top"><b>${esc(t)}</b><span>${fa(x.n)} شیفت، ${hrs(x.min)} ساعت</span></div><em>${x.known ? `میانگین ${fa(Math.round(x.ppl / x.known * 10) / 10).replace('.', '٫')} شاگرد (از ${fa(x.known)} شیفت با تعداد ثبت‌شده)` : 'تعداد شاگردها ثبت نشده'}</em></div>`).join('') : '<p class="rhint">شیفتی در این بازه نیست.</p>';
+  const wait = awaitingPayment(now), owed = wait.reduce((a, e) => a + (priceOf(e) || 0), 0);
+  const money = mode === 'month' ? store.get(`money_${P.key}`) : null;
+  const owedH = `<div class="card rcard"><h3>پرداخت‌ها</h3>
+    <div class="rrow2"><div class="rr-top"><b>طلب باز</b><span>${owed ? `${short(owed)} تومان` : 'هیچ'}</span></div><em>${wait.length ? `${fa(wait.length)} جلسهٔ برگزارشده که هنوز پرداخت نشده (همهٔ زمان‌ها)` : 'همهٔ جلسه‌های برگزارشده پرداخت شده‌اند'}</em></div>
+    ${money ? `<div class="rrow2"><div class="rr-top"><b>دریافتی کاری ${P.short}</b><span>${short(money.work)} تومان</span></div><em>از «حساب من»، با پول دیررسیدهٔ همین ماه</em></div>` : ''}</div>`;
+
+  return head + `<div class="rstory card">${story}</div>${tiles}${trend}
+    <div class="grid2"><div class="card rcard"><h3>مراجع‌ها در ${P.name}</h3>${clientsH}</div><div class="card rcard"><h3>شیفت‌ها در ${P.name}</h3>${shiftsH}</div></div>
+    ${owedH}${S.estMin ? '<p class="rhint">«≈»: بخشی از ساعت‌ها از سوابق قدیمی تخمین زده شده است (ساعت معمول همان جلسه یا شیفت).</p>' : ''}`;
 }
 
 const SCREENS = [today, week, clients, report];
@@ -792,7 +805,8 @@ document.addEventListener('click', async ev => {
   const day = t.closest('[data-day]'); if (day) { state.dayOff = +day.dataset.day; render(); return; }
   const wk = t.closest('[data-wk]'); if (wk) { const d = +wk.dataset.wk; state.weekOff = d === 0 ? 0 : state.weekOff + d; render(); return; }
   const mw = t.closest('[data-mw]'); if (mw) { document.querySelector(`[data-mwopen="${mw.dataset.mw}"]`).classList.toggle('on'); return; }
-  const range = t.closest('[data-range]'); if (range) { state.reportRange = range.dataset.range; render(); return; }
+  const rm = t.closest('[data-rmode]'); if (rm) { state.reportMode = rm.dataset.rmode; state.reportOff = 0; render(); return; }
+  const ro = t.closest('[data-roff]'); if (ro && !ro.disabled) { state.reportOff = Math.min(0, state.reportOff + +ro.dataset.roff); render(); return; }
   const open = t.closest('[data-open]'); if (open) { openSheet('item', { id: open.dataset.open }); return; }
 
   const act = t.closest('[data-act]')?.dataset.act;

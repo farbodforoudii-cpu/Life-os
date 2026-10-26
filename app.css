@@ -445,9 +445,52 @@ input{font-family:inherit}
 .wm-grid .wm-rate b{color:var(--sage)}
 .wm-trend{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;height:120px;align-items:end}
 .wm-bar{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px}
-.wm-bar i{width:100%;max-width:34px;border-radius:8px 8px 4px 4px;background:var(--sage-soft);animation:grow .7s var(--ease) both;transform-origin:bottom}
+.wm-bar i{width:100%;max-width:34px;border-radius:8px 8px 4px 4px;background:var(--sage-soft);animation:growY .7s var(--ease) both;transform-origin:bottom}
 .wm-bar.on i{background:var(--sage)}
 .wm-bar small{font-size:10.5px;color:var(--muted);white-space:nowrap}
 .wm-bar span{font-size:11px;font-weight:600;color:var(--muted)}
-@keyframes grow{from{transform:scaleY(0)}to{transform:none}}
+@keyframes growY{from{transform:scaleY(0)}to{transform:none}}
 @media (prefers-reduced-motion: reduce){.wm-bar i{animation:none}}
+
+/* report: story → numbers → trend → who */
+.rnav{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-6px 0 14px;background:var(--card);border-radius:16px;padding:6px;box-shadow:var(--shadow)}
+.rnav b{font-size:16px}
+.rnav button{border:0;background:var(--fill);border-radius:12px;width:44px;height:38px;font-size:17px;transition:transform .15s var(--ease)}
+.rnav button:active{transform:scale(.92)}
+.rnav button:disabled{opacity:.3}
+.rstory{padding:16px 18px;font-size:16px;font-weight:600;line-height:1.9;margin-bottom:12px}
+.rtiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+@media (max-width:480px){.rtiles{grid-template-columns:minmax(0,1fr)}}
+.rt{background:var(--card);border-radius:18px;padding:12px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:2px;direction:rtl}
+.rt>span{font-size:13px;font-weight:700;color:var(--muted)}
+.rt>b{font-size:28px;font-weight:800;line-height:1.25}
+.rt>b small{font-size:13px;font-weight:600;color:var(--muted);margin-right:5px}
+.rt>em{font-style:normal;font-size:12px;color:var(--muted);line-height:1.6}
+.dl{font-size:13px;font-weight:700;color:var(--muted);white-space:nowrap}
+.dl.up{color:var(--sage)}.dl.down{color:var(--burg)}
+.rhint{margin:6px 4px 12px;font-size:12px;color:var(--muted);line-height:1.7}
+.rcard{padding:16px 18px;display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.rcard h3{margin:0;font-size:15px;font-weight:800}
+.rchart{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;height:170px;align-items:end}
+.rcol{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;min-width:0}
+.rcol small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.rcol span{font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.rbar{width:100%;max-width:38px;flex:1;display:flex;flex-direction:column-reverse;gap:2px;justify-content:flex-start;animation:growY .7s var(--ease) both;transform-origin:bottom}
+.rbar i{display:block;width:100%;border-radius:6px;opacity:.45}
+@media (prefers-color-scheme: dark){.rbar i{opacity:.6}}
+.rbar .c{background:var(--c-client)}.rbar .s{background:var(--c-shift)}.rbar .m{background:var(--sage)}
+.rcol.on .rbar i{opacity:1}
+.rcol.on small,.rcol.on span{color:var(--ink);font-weight:800}
+.rcol.live .rbar i{background-image:repeating-linear-gradient(135deg,transparent 0 5px,rgba(255,255,255,.35) 5px 8px)}
+.rleg{display:flex;gap:14px;font-size:12px;color:var(--muted)}
+.rleg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-left:5px;vertical-align:-1px}
+.rread{margin:0;font-size:13px;line-height:1.9;color:var(--ink);background:var(--fill);border-radius:12px;padding:10px 12px}
+.rrow2{display:flex;flex-direction:column;gap:5px;padding:4px 0}
+.rr-top{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+.rr-top span{color:var(--muted);white-space:nowrap}
+.rr-bar{height:6px;border-radius:3px;background:var(--fill);overflow:hidden}
+.rr-bar i{display:block;height:100%;background:var(--sage);border-radius:3px;animation:grow .7s var(--ease) both;transform-origin:right}
+.rrow2 em{font-style:normal;font-size:12px;color:var(--muted)}
+.rrow2 em.unpaid{color:var(--burg)}
+@media (prefers-reduced-motion: reduce){.rbar,.rr-bar i{animation:none}}
+.rcard h3 small{font-size:11px;font-weight:600;color:var(--muted)}
