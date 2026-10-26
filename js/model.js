@@ -36,6 +36,11 @@ export const EVEN_DAYS = [6, 1, 3]; // شنبه، دوشنبه، چهارشنب�
 export const ODD_DAYS = [0, 2, 4];  // یکشنبه، سه‌شنبه، پنجشنبه
 
 export const fmtTime = m => faDigits(`${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`);
+// Reads a typed number in Persian, Arabic or Latin digits («۱۲»، «١٢»، «12»); empty or invalid gives `fallback`.
+export const toNum = (v, fallback = null) => {
+  const s = String(v ?? '').replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+  return s === '' ? fallback : parseInt(s, 10);
+};
 export const toMin = v => { const [h, m] = String(v || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 export const toHHMM = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 export const weekdayName = d => WEEKDAYS[d.getDay()];

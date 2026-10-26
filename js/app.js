@@ -4,7 +4,7 @@ import { sync } from './sync.js';
 import { faDigits, WEEKDAYS } from './jalali.js';
 import {
   CATS, CANCEL_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
-  weekStart, fmtTime, toMin, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
+  weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
 } from './model.js';
@@ -415,7 +415,7 @@ const SHEETS = {
       <div class="eyebrow">نوع</div>${catChips(draft.cat)}
       ${draft.cat === 'client' ? `<div class="eyebrow">کدوم مراجع؟</div><div class="chips">${gs.map(g => `<button class="chip ${draft.groupId === g.id ? 'sel' : ''}" data-tplgroup="${g.id}">${esc(g.name)}</button>`).join('')}<button class="chip" data-act="group-new" data-back="tpl">+ مراجع جدید</button></div>` : ''}
       <label class="fld">عنوان${draft.cat === 'client' ? ' (اگه خالی بمونه، اسم مراجع)' : ''}<input id="fTitle" value="${esc(t.title)}" placeholder="${draft.cat === 'shift' ? 'مثلاً گردان فرشته' : draft.cat === 'uni' ? 'مثلاً تفسیر قرآن' : ''}"></label>
-      ${draft.cat === 'shift' ? `<label class="fld">تعداد معمول شاگردها (اختیاری)<input id="fHead" type="number" inputmode="numeric" min="0" value="${t.headcount ?? ''}"></label>` : ''}
+      ${draft.cat === 'shift' ? `<label class="fld">تعداد معمول شاگردها (اختیاری)<input id="fHead" type="text" inputmode="numeric" autocomplete="off" value="${t.headcount != null ? fa(t.headcount) : ''}"></label>` : ''}
       <button class="wide-btn" data-act="save-tpl">ذخیره</button>
       ${s.id ? '<button class="wide-btn danger" data-act="delete-tpl">حذف از الگو (از امروز به بعد)</button>' : ''}`;
   },
@@ -433,7 +433,7 @@ const SHEETS = {
         <div class="mini"><span>جلسهٔ بعد</span><b>${st.next ? `${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : '—'}</b></div>
         <div class="mini"><span>کل جلسه‌ها</span><b>${fa(st.total)}</b></div></div>
       <div class="sh-sub"><b>دوره‌ها</b><button class="pill-btn" data-act="series-new">+ دورهٔ جدید</button></div>
-      ${series.length ? series.map(x => `<div class="sr-row"><span>${fa(x.size)} جلسه، از ${weekdayName(fromDayKey(x.start))} ${jDayMonth(fromDayKey(x.start))}</span>
+      ${series.length ? series.map(x => `<div class="sr-row"><button class="sr-edit" data-act="series-edit" data-id="${x.id}">${fa(x.size)} جلسه، از ${weekdayName(fromDayKey(x.start))} ${jDayMonth(fromDayKey(x.start))}<span class="soft">ویرایش</span></button>
         <button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></div>`).join('') : '<p class="hint">هنوز دوره‌ای نیست. «دورهٔ جدید» را بزن.</p>'}
       <div class="sh-sub"><b>سابقه</b></div>
       ${hist.length ? hist.map(e => { const n = nums.get(e.id); return `<button class="hs-row ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><b>${isActive(e) ? (n ? fa(n.n) : '–') : '✕'}</b><span>${weekdayName(fromDayKey(e.date))} ${jDayMonth(fromDayKey(e.date))}</span><em>${isActive(e) ? `${fa(headcount(e) ?? '')} نفر` : (e.reason || 'لغو')}</em></button>`; }).join('') : '<p class="hint">هنوز جلسه‌ای ثبت نشده.</p>'}`;
@@ -445,17 +445,27 @@ const SHEETS = {
       <label class="fld">اسم گروه<input id="fName" value="${esc(g.name)}" placeholder="مثلاً عباس آقا و خانم فروزنده"></label>
       <label class="fld">اعضا (با ویرگول جدا کن)<input id="fMembers" value="${esc((g.members || []).join('، '))}" placeholder="عباس، فروزنده"></label>
       <label class="fld">محل جلسه‌ها (اختیاری)<input id="fPlace" value="${esc(g.place || '')}"></label>
-      ${s.id ? '' : `<label class="fld">تعداد جلسه‌های دورهٔ فعلی<input id="fSize" type="number" inputmode="numeric" min="1" value="8"></label>
-      <label class="fld">چند جلسه از این دوره تا امروز رفته؟ (برای شروع وسط دوره)<input id="fDone" type="number" inputmode="numeric" min="0" value="0"></label>
+      ${s.id ? '' : `<label class="fld">تعداد جلسه‌های دورهٔ فعلی<input id="fSize" type="text" inputmode="numeric" autocomplete="off" value="۸"></label>
+      <label class="fld">چند جلسه از این دوره تا امروز رفته؟ (برای شروع وسط دوره)<input id="fDone" type="text" inputmode="numeric" autocomplete="off" value="۰"></label>
       <label class="chk"><input type="checkbox" id="fPaid"> این دوره پرداخت شده</label>`}
       <button class="wide-btn" data-act="save-group">ذخیره</button>
       ${s.id ? '<button class="wide-btn danger" data-act="archive-group">بایگانی (دیگه نشون داده نشه)</button>' : ''}`;
   },
 
   seriesNew(s) {
+    if (s.id) {
+      const x = store.get(s.id);
+      return sheetHead('ویرایش دوره') + `
+      <p class="hint">شروع: ${weekdayName(fromDayKey(x.start))} ${jDayMonth(fromDayKey(x.start))}</p>
+      <label class="fld">تعداد جلسه‌ها<input id="fSize" type="text" inputmode="numeric" autocomplete="off" value="${fa(x.size)}"></label>
+      <label class="fld">جلسه‌هایی که پیش از ثبت در اپ برگزار شد<input id="fOffset" type="text" inputmode="numeric" autocomplete="off" value="${fa(x.offset || 0)}"></label>
+      <label class="chk"><input type="checkbox" id="fPaid" ${x.paid ? 'checked' : ''}> پرداخت شده</label>
+      <button class="wide-btn" data-act="save-series">ذخیره</button>
+      <button class="wide-btn danger" data-act="delete-series">حذف این دوره</button>`;
+    }
     const last = seriesOf(s.groupId).pop();
     return sheetHead('دورهٔ جدید') + `
-      <label class="fld">تعداد جلسه‌ها<input id="fSize" type="number" inputmode="numeric" min="1" value="${last ? last.size : 8}"></label>
+      <label class="fld">تعداد جلسه‌ها<input id="fSize" type="text" inputmode="numeric" autocomplete="off" value="${fa(last ? last.size : 8)}"></label>
       <div class="eyebrow">از کِی شروع می‌شود؟</div>${dayChips(0)}
       <label class="chk"><input type="checkbox" id="fPaid"> پرداخت شده</label>
       <button class="wide-btn" data-act="save-series">ذخیره</button>`;
@@ -577,6 +587,7 @@ document.addEventListener('click', async ev => {
   if (act === 'group-new') { openSheet('groupEdit', { back: t.closest('[data-act]').dataset.back ? { ...s } : null }); return; }
   if (act === 'group-edit') { openSheet('groupEdit', { id: s.id }); return; }
   if (act === 'series-new') { openSheet('seriesNew', { groupId: s.id, dayOff: 0 }); return; }
+  if (act === 'series-edit') { openSheet('seriesNew', { groupId: s.id, id: t.closest('[data-act]').dataset.id }); return; }
   if (act === 'export') { exportBackup(); return; }
   if (act === 'sync-now') { await sync.run(); renderSheet(); return; }
   if (act === 'sign-out') { if (!confirm('همگام‌سازی روی این دستگاه خاموش شود؟ داده‌های این دستگاه می‌مانند.')) return; await sync.signOut(); renderSheet(); return; }
@@ -669,7 +680,7 @@ document.addEventListener('click', async ev => {
       if (!title) { toast('عنوان را بنویس'); return; }
       const start = toMin($('#fStart').value), end = Math.max(toMin($('#fEnd').value), start + 15);
       const tpl = s.id ? store.get(s.id) : { id: uid(), kind: 'template', from: todayKey() };
-      Object.assign(tpl, { days: [...d.days], start, end, title, cat: d.cat, groupId: d.cat === 'client' ? d.groupId : null, headcount: $('#fHead') && $('#fHead').value !== '' ? +$('#fHead').value : null });
+      Object.assign(tpl, { days: [...d.days], start, end, title, cat: d.cat, groupId: d.cat === 'client' ? d.groupId : null, headcount: $('#fHead') ? toNum($('#fHead').value) : null });
       await store.put(tpl);
       if (s.id) await applyTemplate(tpl);
       openSheet('templates');
@@ -701,7 +712,7 @@ document.addEventListener('click', async ev => {
     Object.assign(g, { name, members, place: $('#fPlace').value.trim() || null });
     await store.put(g);
     if (!s.id) {
-      const size = Math.max(1, +$('#fSize').value || 8), doneBefore = Math.max(0, +$('#fDone').value || 0);
+      const size = Math.max(1, toNum($('#fSize').value, 8)), doneBefore = Math.max(0, toNum($('#fDone').value, 0));
       // Starting mid-package: shrink the first package so numbering continues from where it is.
       await store.put({ id: uid(), kind: 'series', groupId: g.id, size, start: todayKey(), paid: $('#fPaid').checked, offset: doneBefore });
     }
@@ -719,8 +730,18 @@ document.addEventListener('click', async ev => {
   if (s.kind === 'seriesNew') {
     const pd = t.closest('[data-pickday]'); if (pd) { s.dayOff = +pd.dataset.pickday; pd.parentNode.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c === pd)); return; }
     if (act === 'save-series') {
-      await store.put({ id: uid(), kind: 'series', groupId: s.groupId, size: Math.max(1, +$('#fSize').value || 8), start: dayKey(addDays(new Date(), s.dayOff)), paid: $('#fPaid').checked });
+      const size = Math.max(1, toNum($('#fSize').value, 8));
+      if (s.id) {
+        const x = store.get(s.id);
+        Object.assign(x, { size, paid: $('#fPaid').checked, offset: Math.min(size, Math.max(0, toNum($('#fOffset').value, 0))) });
+        await store.put(x);
+      } else await store.put({ id: uid(), kind: 'series', groupId: s.groupId, size, start: dayKey(addDays(new Date(), s.dayOff)), paid: $('#fPaid').checked });
       openSheet('group', { id: s.groupId }); await render(false); return;
+    }
+    if (act === 'delete-series') {
+      const x = store.get(s.id);
+      if (!confirm('این دوره حذف شود؟ جلسه‌ها می‌مانند و دوباره شماره‌گذاری می‌شوند.')) return;
+      await store.remove(x); openSheet('group', { id: s.groupId }); await render(false); return;
     }
   }
 });
