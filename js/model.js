@@ -141,15 +141,27 @@ export function numberSessions(gid) {
   return numCache.get(gid);
 }
 function computeNumbers(gid) {
-  // `offset` = sessions of the first package that happened before the app was used.
-  const series = seriesOf(gid).map(s => ({ s, used: s.offset || 0 }));
+  // `offset` = sessions of a package that happened before the app was used.
+  // A session pinned to a package (`seriesId`, e.g. from an invoice) stays there; `outside` keeps it out of all.
+  const series = seriesOf(gid).map(s => ({ s, room: s.size - (s.offset || 0), list: [] }));
+  const byId = new Map(series.map(x => [x.s.id, x]));
+  const sessions = sessionsOf(gid);
+  for (const e of sessions) { const x = e.seriesId && byId.get(e.seriesId); if (x) x.room--; }
   const out = new Map();
-  for (const e of sessionsOf(gid)) {
-    const slot = series.find(x => x.s.start <= e.date && x.used < x.s.size);
-    if (slot) { slot.used++; out.set(e.id, { series: slot.s, n: slot.used, size: slot.s.size }); }
-    else out.set(e.id, null);
+  for (const e of sessions) {
+    let x = e.outside ? null : e.seriesId && byId.get(e.seriesId);
+    if (!x && !e.outside) { x = series.find(y => y.s.start <= e.date && y.room > 0); if (x) x.room--; }
+    if (x) x.list.push(e); else out.set(e.id, null);
   }
+  for (const x of series) x.list.forEach((e, i) => out.set(e.id, { series: x.s, n: (x.s.offset || 0) + i + 1, size: x.s.size }));
   return out;
+}
+
+// A package is finished once all its sessions are behind us.
+export function seriesDone(s, now = new Date()) {
+  const nums = numberSessions(s.groupId);
+  const done = sessionsOf(s.groupId).filter(e => nums.get(e.id)?.series === s && liveStatus(e, now) === 'done').length;
+  return (s.offset || 0) + done >= s.size;
 }
 
 export function sessionInfo(e) {
@@ -186,6 +198,29 @@ export function isPaid(e) {
 export const awaitingPayment = (now = new Date()) =>
   store.all('entry').filter(e => e.cat === 'client' && isActive(e) && liveStatus(e, now) === 'done' && !isPaid(e)).sort(byTime);
 
+// ---------- prices & invoices ----------
+// A group's price list has rows that hold from a given day, one price per number of people present.
+// A session's own `price` (as billed) wins; otherwise the row in force on its date, for its headcount.
+export function priceRow(g, date) {
+  return (g && g.prices || []).filter(p => p.from <= date).sort((a, b) => a.from.localeCompare(b.from)).pop() || null;
+}
+export function priceOf(e) {
+  if (e.price != null) return e.price;
+  const g = e.groupId && store.get(e.groupId), n = headcount(e), row = priceRow(g, e.date);
+  return row && n != null && row.by[n] != null ? row.by[n] : null;
+}
+export const sessionKind = e => headcount(e) === 1 ? 'خصوصی' : `گروهی${headcount(e) ? `، ${faDigits(headcount(e))} نفر` : ''}`;
+export const money = n => n == null ? '—' : Number(n).toLocaleString('fa-IR');
+// Every session a package holds, in order, with what it costs.
+export function invoiceOf(seriesId) {
+  const s = store.get(seriesId);
+  if (!s) return null;
+  const nums = numberSessions(s.groupId);
+  const rows = sessionsOf(s.groupId).filter(e => nums.get(e.id)?.series === s).map(e => ({ e, n: nums.get(e.id).n, price: priceOf(e), done: liveStatus(e) === 'done' }));
+  return { s, g: store.get(s.groupId), rows, total: rows.reduce((a, r) => a + (r.price || 0), 0), missing: rows.filter(r => r.price == null).length };
+}
+export const profile = () => store.get('profile') || { id: 'profile', kind: 'profile' };
+
 // Who is expected: all members minus those marked absent; a manual count wins.
 export function headcount(e) {
   if (e.headcount != null) return e.headcount;
@@ -198,6 +233,19 @@ export function headcount(e) {
 export function lastHeadcount(title, beforeKey) {
   const prev = store.all('entry').filter(x => x.title === title && x.headcount != null && x.date < beforeKey).sort(byTime).pop();
   return prev ? prev.headcount : null;
+}
+
+// One-tap counts for a shift: the counts it usually has (most frequent of the last ten), else around the
+// weekly pattern's usual count, else a plain small range.
+export function headcountChoices(e) {
+  const prev = store.all('entry').filter(x => x.title === e.title && x.id !== e.id && x.headcount != null && x.date <= e.date).sort(byTime).slice(-10);
+  if (prev.length) {
+    const c = new Map(); for (const x of prev) c.set(x.headcount, (c.get(x.headcount) || 0) + 1);
+    const top = [...c].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+    return [...new Set([...top.slice(0, 3), top[0] - 1, top[0] + 1])].filter(n => n > 0).slice(0, 5).sort((a, b) => a - b);
+  }
+  const usual = e.templateId && store.get(e.templateId)?.headcount;
+  return usual ? [usual - 1, usual, usual + 1].filter(n => n > 0) : [2, 3, 4, 5, 6];
 }
 
 // How long a new item usually lasts: the most common length of earlier timed items with the same client
@@ -213,16 +261,20 @@ export function usualMinutes({ title, cat, groupId }) {
 }
 
 // Frequent titles first, then the generic defaults that are not already in the list.
-export function learnedPresets(limit = 10) {
+// With a day and a minute, what usually happens on that weekday around that time comes first.
+export function learnedPresets(limit = 10, ctx = null) {
   // What was actually done in the last three months, typed by hand or brought in from the old schedule.
   const counts = new Map(), since = dayKey(addDays(new Date(), -90));
   for (const e of store.all('entry')) {
     if ((e.source !== 'manual' && e.source !== 'import') || e.groupId || e.movedFrom || e.date < since) continue;
-    const c = counts.get(e.title) || { title: e.title, cat: e.cat, n: 0 };
+    const c = counts.get(e.title) || { title: e.title, cat: e.cat, n: 0, fit: 0 };
     c.n++;
+    if (ctx && fromDayKey(e.date).getDay() === ctx.weekday) c.fit += e.untimed || Math.abs(e.start - ctx.minute) <= 120 ? 1 : 0;
     counts.set(e.title, c);
   }
-  const learned = [...counts.values()].sort((a, b) => b.n - a.n);
+  const taken = new Set(ctx ? entriesOn(ctx.date).filter(isActive).map(e => e.title) : []);
+  const learned = [...counts.values()].filter(p => !taken.has(p.title)).sort((a, b) => b.fit - a.fit || b.n - a.n);
+  learned.forEach((p, i) => { p.suggested = i < 3 && p.fit >= 2; });
   const seen = new Set(learned.map(p => p.title));
   return [...learned, ...DEFAULT_PRESETS.filter(p => !seen.has(p.title))].slice(0, limit);
 }

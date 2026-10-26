@@ -7,7 +7,7 @@ import {
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange, usualMinutes,
+  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -84,11 +84,21 @@ function today() {
       <div style="display:flex;align-items:center;gap:10px"><span class="eyebrow" style="text-align:left">${items.length ? `${fa(items.length)} برنامه${nc ? `، ${fa(nc)} لغو` : ''}` : ''}</span>
       <button class="icon-btn" data-act="settings" aria-label="تنظیمات و همگام‌سازی">${GEAR}<i class="sync-dot ${sync.state.status}"></i></button></div></div>
     <div class="days">${strip}</div>
-    <div class="cols"><div class="main list stagger">${heroH}${isToday ? dayPath(items, now) : ''}${items.length ? items.map(e => itemHTML(e)).join('') : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامهٔ ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
+    <div class="cols"><div class="main list stagger">${heroH}${isToday ? dayPath(items, now) : ''}${items.length ? items.map(e => itemHTML(e) + quickCount(e)).join('') : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامهٔ ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
       ${side ? `<aside class="side"><div class="eyebrow" style="margin-bottom:8px">فردا، ${weekdayName(addDays(now, 1))} ${jDayMonth(addDays(now, 1))}</div>
         <div class="list stagger" style="opacity:.85">${side.length ? side.map(e => itemHTML(e, true)).join('') : '<div class="card empty" style="padding:18px">هنوز چیزی نیست</div>'}</div></aside>` : ''}</div>`;
 }
 const fromJ = d => jDayMonth(d).split(' ')[0];
+
+// A finished shift asks for its headcount right in the list: one tap on the likely number.
+function quickCount(e) {
+  if (e.cat !== 'shift' || e.headcount != null || !isActive(e) || e.source === 'import' || state.dayOff > 0) return '';
+  const st = liveStatus(e);
+  if (st !== 'done' && st !== 'now') return '';
+  return `<div class="hcq"><span>چند شاگرد بودند؟</span>${headcountChoices(e).map(n => `<button class="chip small" data-hcq="${e.id}" data-n="${n}">${fa(n)}</button>`).join('')}<button class="chip small ghost" data-open="${e.id}">دیگر</button></div>`;
+}
+const num = n => `\u2066${money(n)}\u2069`;
+const jFull = k => { const d = fromDayKey(k); return `${weekdayName(d)} ${jDayMonth(d)}`; };
 
 // The day as a path from 7 in the morning (right) to midnight (left). It draws itself up to now and each
 // stop lights up as the line reaches it: done ones get a tick, the current one pulses, the rest wait hollow.
@@ -163,9 +173,11 @@ function clients() {
       <div class="cl-sub"><span>${(g.members || []).length ? `${fa(g.members.length)} نفر: ${esc(g.members.join('، '))}` : ''}</span><span>${g.place ? esc(g.place) : ''}</span></div></button>`;
   }).join('');
   const waiting = awaitingPayment();
+  const ready = list.flatMap(g => seriesOf(g.id)).filter(x => !x.paid && seriesDone(x)).map(x => invoiceOf(x.id));
+  const readyH = ready.length ? `<div class="card inv-ready stagger"><div class="eyebrow">دوره تمام شد؛ فاکتور آماده است</div>${ready.map(v => `<button class="inv-row" data-act="invoice" data-id="${v.s.id}"><b>${esc(v.g.name)}</b><span>${fa(v.rows.length)} جلسه${v.total ? `، ${num(v.total)} تومان` : ''}</span><em>دیدن فاکتور</em></button>`).join('')}</div>` : '';
   return `<div class="head"><div><div class="eyebrow">${list.length ? `${fa(list.length)} گروه فعال` : 'دوره‌ها و جلسه‌ها'}${waiting.length ? `، <span style="color:var(--burg)">${fa(waiting.length)} جلسه منتظر پرداخت</span>` : ''}</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
-    ${list.length ? `<div class="cl-grid stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}`;
+    ${readyH}${list.length ? `<div class="cl-grid stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}`;
 }
 
 function report() {
@@ -227,7 +239,10 @@ function report() {
 // The range told as short news; every number says where it comes from.
 function reportNews(done, cancelled, all, perGroup, hours, fh) {
   const N = [], wait = awaitingPayment().sort((a, b) => a.date.localeCompare(b.date));
-  if (wait.length) N.push({ k: 'پرداخت', t: `${fa(wait.length)} جلسه منتظر پرداخت`, d: `قدیمی‌ترین: ${wait[0].title}، ${weekdayName(fromDayKey(wait[0].date))} ${jDayMonth(fromDayKey(wait[0].date))}.`, tone: 'r' });
+  if (wait.length) {
+    const sum = wait.reduce((s, e) => s + (priceOf(e) || 0), 0), noPrice = wait.filter(e => priceOf(e) == null).length;
+    N.push({ k: 'پرداخت', t: `${fa(wait.length)} جلسه منتظر پرداخت${sum ? `، ${num(sum)} تومان` : ''}`, d: `${sum ? `جمع مبلغ این جلسه‌ها${noPrice ? `؛ ${fa(noPrice)} جلسه قیمت ندارد` : ''}. ` : ''}قدیمی‌ترین: ${wait[0].title}، ${jFull(wait[0].date)}.`, tone: 'r' });
+  }
   else if (done.some(e => e.cat === 'client')) N.push({ k: 'پرداخت', t: 'همهٔ جلسه‌ها تسویه شده', d: 'هیچ جلسهٔ تمام‌شده‌ای منتظر پرداخت نیست.', tone: 'g' });
   const top = perGroup.slice().sort((a, b) => b.n - a.n)[0];
   if (top && perGroup.length > 1) N.push({ k: 'مراجع', t: `${top.g.name}، بیشترین جلسه با ${fa(top.n)} بار`, d: `از ${fa(perGroup.length)} مراجع در این بازه.` });
@@ -342,11 +357,15 @@ const SHEETS = {
     const start = s.start ?? (isToday ? Math.floor(m / 5) * 5 : 9 * 60);
     const end = s.end ?? Math.min(start + 60, END_OF_DAY);
     const gs = groups();
+    const presets = learnedPresets(12, { weekday: d.getDay(), minute: start, date: dayKey(d) });
+    const sug = presets.filter(p => p.suggested), rest = presets.filter(p => !p.suggested);
+    const chip = p => `<button class="chip ${p.suggested ? 'sug' : ''}" data-quick="${esc(p.title)}" data-cat="${p.cat}"><i class="dot" style="background:var(--c-${p.cat})"></i>${esc(p.title)}</button>`;
     return sheetHead('افزودن', `<span class="eyebrow">${isToday ? `الان ${fmtTime(m)}` : ''}</span>`) + `
       ${dayChips(s.dayOff)}
       ${timeInputs(start, end, s.end == null)}
-      <div class="eyebrow">یه لمس = ثبت</div>
-      <div class="chips">${learnedPresets().map(p => `<button class="chip" data-quick="${esc(p.title)}" data-cat="${p.cat}"><i class="dot" style="background:var(--c-${p.cat})"></i>${esc(p.title)}</button>`).join('')}</div>
+      ${sug.length ? `<div class="eyebrow">پیشنهاد برای ${s.dayOff === 0 ? 'امروز' : weekdayName(d)} در این ساعت (از ${weekdayName(d)}\u200cهای گذشته)</div><div class="chips">${sug.map(chip).join('')}</div>` : ''}
+      <div class="eyebrow">یک لمس، ثبت</div>
+      <div class="chips">${rest.map(chip).join('')}</div>
       ${gs.length ? `<div class="eyebrow">جلسهٔ مراجع (مثلاً جبرانی)</div><div class="chips">${gs.map(g => `<button class="chip" data-quickgroup="${g.id}"><i class="dot" style="background:var(--c-client)"></i>${esc(g.name)}</button>`).join('')}</div>` : ''}
       <div class="eyebrow">چیز جدید</div>
       ${catChips(s.cat || 'personal')}
@@ -371,7 +390,13 @@ const SHEETS = {
     } else if (e.cat === 'shift' || e.cat === 'client') {
       const guess = hc ?? lastHeadcount(e.title, e.date) ?? (e.templateId && store.get(e.templateId)?.headcount) ?? null;
       body += `<div class="eyebrow">تعداد ${e.cat === 'shift' ? 'شاگردها' : 'نفرات'}${hc == null && guess != null ? ` (دفعهٔ قبل ${fa(guess)})` : ''}</div>
-        <div class="stepper"><button data-hc="-1" aria-label="کمتر">−</button><b>${hc == null ? '؟' : fa(hc)}</b><button data-hc="1" aria-label="بیشتر">+</button>${hc == null && guess != null ? `<button class="chip" data-hcset="${guess}">همون ${fa(guess)}</button>` : ''}</div>`;
+        <div class="stepper"><button data-hc="-1" aria-label="کمتر">−</button><b>${hc == null ? '؟' : fa(hc)}</b><button data-hc="1" aria-label="بیشتر">+</button></div>
+        <div class="chips">${headcountChoices(e).map(n => `<button class="chip small ${hc === n ? 'sel' : ''}" data-hcset="${n}">${fa(n)}</button>`).join('')}</div>`;
+    }
+    if (e.cat === 'client' && isActive(e)) {
+      const pr = priceOf(e);
+      body += pr != null ? `<div class="price-line"><span>مبلغ این جلسه</span><b>${num(pr)} تومان</b><em>${e.price != null ? 'ثبت‌شده برای همین جلسه' : `از فهرست قیمت، ${sessionKind(e)}`}</em></div>`
+        : g ? `<button class="wide-btn ghost" data-act="prices" data-id="${g.id}">قیمت وارد نشده؛ بزن تا وارد کنی</button>` : '';
     }
     if (e.cat === 'client' && isActive(e) && st === 'done') {
       const series = info && info.series;
@@ -391,6 +416,7 @@ const SHEETS = {
       ${timeInputs(e.start, e.end)}
       ${catChips(e.cat)}
       <label class="fld">یادداشت<input id="fNote" value="${esc(e.note || '')}" placeholder="اختیاری"></label>
+      ${e.cat === 'client' ? `<label class="fld">مبلغ همین جلسه به تومان (خالی = از فهرست قیمت)<input id="fPrice" type="text" inputmode="numeric" autocomplete="off" value="${e.price != null ? money(e.price) : ''}"></label>` : ''}
       <button class="wide-btn" data-act="save-item">ذخیره</button>
       <button class="wide-btn danger" data-act="delete-item">پاک کردن</button></details>`;
     return sheetHead(CATS[e.cat]) + body;
@@ -435,9 +461,11 @@ const SHEETS = {
       <div class="cards-row"><div class="mini"><span>دورهٔ فعلی</span><b>${st.current ? `${fa(st.done)} از ${fa(st.current.size)}` : '—'}</b></div>
         <div class="mini"><span>جلسهٔ بعد</span><b>${st.next ? `${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : '—'}</b></div>
         <div class="mini"><span>کل جلسه‌ها</span><b>${fa(st.total)}</b></div></div>
+      <div class="sh-sub"><b>قیمت هر جلسه</b><button class="pill-btn" data-act="prices" data-id="${g.id}">ویرایش</button></div>
+      ${priceList(g)}
       <div class="sh-sub"><b>دوره‌ها</b><button class="pill-btn" data-act="series-new">+ دورهٔ جدید</button></div>
-      ${series.length ? series.map(x => `<div class="sr-row"><button class="sr-edit" data-act="series-edit" data-id="${x.id}">${fa(x.size)} جلسه، از ${weekdayName(fromDayKey(x.start))} ${jDayMonth(fromDayKey(x.start))}<span class="soft">ویرایش</span></button>
-        <button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></div>`).join('') : '<p class="hint">هنوز دوره‌ای نیست. «دورهٔ جدید» را بزن.</p>'}
+      ${series.length ? series.map(x => `<div class="sr-row"><button class="sr-edit" data-act="series-edit" data-id="${x.id}">${fa(x.size)} جلسه، از ${jDayMonth(fromDayKey(x.start))}<span class="soft">ویرایش</span></button>
+        <span class="sr-acts"><button class="chip small" data-act="invoice" data-id="${x.id}">فاکتور</button><button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></span></div>`).join('') : '<p class="hint">هنوز دوره‌ای نیست. «دورهٔ جدید» را بزن.</p>'}
       <div class="sh-sub"><b>سابقه</b></div>
       ${hist.length ? hist.map(e => { const n = nums.get(e.id); return `<button class="hs-row ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><b>${isActive(e) ? (n ? fa(n.n) : '–') : '✕'}</b><span>${weekdayName(fromDayKey(e.date))} ${jDayMonth(fromDayKey(e.date))}</span><em>${isActive(e) ? `${fa(headcount(e) ?? '')} نفر` : (e.reason || 'لغو')}</em></button>`; }).join('') : '<p class="hint">هنوز جلسه‌ای ثبت نشده.</p>'}`;
   },
@@ -448,6 +476,10 @@ const SHEETS = {
       <label class="fld">اسم گروه<input id="fName" value="${esc(g.name)}" placeholder="مثلاً عباس آقا و خانم فروزنده"></label>
       <label class="fld">اعضا (با ویرگول جدا کن)<input id="fMembers" value="${esc((g.members || []).join('، '))}" placeholder="عباس، فروزنده"></label>
       <label class="fld">محل جلسه‌ها (اختیاری)<input id="fPlace" value="${esc(g.place || '')}"></label>
+      <div class="eyebrow">برای فاکتور (اختیاری)</div>
+      <label class="fld">نام روی فاکتور<input id="fInvName" value="${esc(g.invoiceName || '')}" placeholder="${esc(g.name || '')}"></label>
+      <label class="fld">شمارهٔ تماس<input id="fPhone" dir="ltr" inputmode="tel" value="${esc(g.phone || '')}"></label>
+      <label class="fld">نشانی<input id="fAddress" value="${esc(g.address || '')}"></label>
       ${s.id ? '' : `<label class="fld">تعداد جلسه‌های دورهٔ فعلی<input id="fSize" type="text" inputmode="numeric" autocomplete="off" value="۸"></label>
       <label class="fld">چند جلسه از این دوره تا امروز رفته؟ (برای شروع وسط دوره)<input id="fDone" type="text" inputmode="numeric" autocomplete="off" value="۰"></label>
       <label class="chk"><input type="checkbox" id="fPaid"> این دوره پرداخت شده</label>`}
@@ -474,6 +506,48 @@ const SHEETS = {
       <button class="wide-btn" data-act="save-series">ذخیره</button>`;
   },
 
+  prices(s) {
+    const g = store.get(s.id);
+    const row = priceRow(g, todayKey()), max = Math.max(1, (g.members || []).length);
+    // A missing count is suggested from the largest one entered, per person: price ÷ people × people.
+    const ref = row ? Object.entries(row.by).map(([n, v]) => [+n, v]).filter(([n]) => n > 1).sort((a, b) => b[0] - a[0])[0] : null;
+    const fields = Array.from({ length: max }, (_, i) => i + 1).map(n => {
+      const v = row?.by[n];
+      const sug = v == null && ref && n > 1 && n !== ref[0] ? Math.round(ref[1] / ref[0] * n / 1000) * 1000 : null;
+      return `<label class="fld">${n === 1 ? 'یک نفر (خصوصی)' : `${fa(n)} نفر`}<input id="fP${n}" type="text" inputmode="numeric" autocomplete="off" value="${v != null ? money(v) : ''}" placeholder="تومان"></label>
+        ${sug ? `<button class="chip small sug" data-sugp="${n}" data-v="${sug}">پیشنهاد ${num(sug)} = ${num(ref[1])} ÷ ${fa(ref[0])} × ${fa(n)}</button>` : ''}`;
+    }).join('');
+    const cur = groupStatus(g.id).current;
+    return sheetHead(`قیمت هر جلسه، ${esc(g.name)}`) + `
+      <p class="hint">مبلغ یک جلسه بر اساس تعداد حاضران همان جلسه. ${row ? `قیمت تازه از امروز حساب می‌شود و جلسه‌های گذشته با قیمت خودشان می‌مانند.` : `نخستین قیمت از شروع دورهٔ فعلی${cur ? ` (${jFull(cur.start)})` : ''} حساب می‌شود.`}</p>
+      ${fields}
+      <button class="wide-btn" data-act="save-prices" data-id="${g.id}">ذخیره</button>
+      ${(g.prices || []).length > 1 ? `<details class="more"><summary>قیمت‌های قبلی</summary>${[...g.prices].reverse().map(r => `<p class="hint">از ${jFull(r.from)}: ${Object.entries(r.by).map(([n, v]) => `${n === '1' ? 'خصوصی' : `${fa(n)} نفر`} ${num(v)}`).join('، ')}</p>`).join('')}</details>` : ''}`;
+  },
+
+  invoice(s) {
+    const v = invoiceOf(s.id);
+    if (!v) return sheetHead('پیدا نشد');
+    const left = v.rows.filter(r => !r.done).length;
+    return sheetHead('فاکتور') + invoiceHTML(v) + `
+      ${v.missing ? `<button class="wide-btn ghost" data-act="prices" data-id="${v.g.id}">${fa(v.missing)} جلسه قیمت ندارد؛ بزن تا وارد کنی</button>` : ''}
+      <p class="hint">جمع = مجموع مبلغ ${fa(v.rows.length)} جلسهٔ این دوره. مبلغ هر جلسه از فهرست قیمت مراجع و بر اساس تعداد حاضران همان جلسه است، مگر برای آن جلسه مبلغ جداگانه ثبت شده باشد.${left ? ` ${fa(left)} جلسه هنوز برگزار نشده است.` : ''}</p>
+      <button class="wide-btn" data-act="inv-image" data-id="${v.s.id}">ارسال تصویر فاکتور</button>
+      <button class="wide-btn ghost" data-act="inv-text" data-id="${v.s.id}">کپی متن فاکتور</button>
+      <button class="wide-btn ${v.s.paid ? 'ghost' : ''}" data-paid="${v.s.id}">${v.s.paid ? 'پرداخت ثبت شده؛ برداشتن' : 'مبلغ این دوره رسید'}</button>
+      <div class="chips"><button class="chip small" data-act="group-edit" data-id="${v.g.id}">اطلاعات تماس مراجع</button><button class="chip small" data-act="profile">اطلاعات پرداخت شما</button></div>`;
+  },
+
+  profile() {
+    const pr = profile();
+    return sheetHead('اطلاعات پرداخت روی فاکتور') + `
+      <p class="hint">پایین هر فاکتور نوشته می‌شود. فقط روی دستگاه‌های شما و فضای همگام‌سازی خودتان نگه داشته می‌شود.</p>
+      <label class="fld">نام<input id="fPName" value="${esc(pr.name || '')}"></label>
+      <label class="fld">شمارهٔ کارت<input id="fPCard" dir="ltr" inputmode="numeric" value="${esc(pr.card || '')}"></label>
+      <label class="fld">شمارهٔ شبا<input id="fPIban" dir="ltr" autocapitalize="characters" value="${esc(pr.iban || '')}"></label>
+      <button class="wide-btn" data-act="save-profile">ذخیره</button>`;
+  },
+
   settings() {
     const st = sync.state;
     const statusText = { off: 'خاموش', idle: st.lastSync ? `همگام، ${new Date(st.lastSync).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : 'آماده', syncing: 'در حال همگام‌سازی…', error: 'خطا', offline: 'آفلاین؛ بعداً همگام می‌شود' }[st.status];
@@ -489,12 +563,102 @@ const SHEETS = {
         <label class="fld">کد همگام‌سازی<input id="syncCode" dir="ltr" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"></label>
         <button class="wide-btn" data-act="sync-paste">چسباندن کد و اتصال</button>
         <button class="wide-btn ghost" data-act="sync-new">روشن کردن همگام‌سازی (نخستین دستگاه)</button>`}
+      <div class="sh-sub"><b>فاکتور</b></div>
+      <button class="wide-btn ghost" data-act="profile">اطلاعات پرداخت روی فاکتور</button>
       <div class="sh-sub"><b>پشتیبان و سوابق</b></div>
       <button class="wide-btn ghost" data-act="export">گرفتن فایل پشتیبان</button>
       <label class="wide-btn ghost file">بازکردن فایل پشتیبان یا سوابق<input type="file" id="importFile" accept="application/json,.json"></label>
       <p class="hint">فایل سوابق (مثلاً تقویم ۱۴۰۵ که از Keynote تبدیل شده) هم از همین‌جا وارد می‌شود. چیزی حذف نمی‌شود؛ فقط اضافه یا به‌روز می‌شود.</p>`;
   },
 };
+// The group's prices in force today, or a quiet nudge to enter them.
+function priceList(g) {
+  const row = priceRow(g, todayKey());
+  if (!row) return `<button class="wide-btn ghost" data-act="prices" data-id="${g.id}">قیمت وارد نشده؛ بزن تا وارد کنی</button>`;
+  return `<div class="chips">${Object.entries(row.by).map(([n, v]) => `<span class="chip small static">${n === '1' ? 'خصوصی' : `${fa(n)} نفر`}: ${num(v)}</span>`).join('')}</div><p class="hint">از ${jFull(row.from)}، به تومان</p>`;
+}
+
+const jMonthsOf = rows => { const ms = [...new Set(rows.map(r => jMonthYear(fromDayKey(r.e.date))))]; return ms.length > 1 ? `${ms[0].split(' ')[0]}–${ms[ms.length - 1]}` : ms[0] || ''; };
+function invoiceHTML(v) {
+  const g = v.g, pr = profile();
+  return `<div class="inv"><div class="inv-top"><div><span class="eyebrow">فاکتور جلسه‌های تمرین</span><b class="inv-name">${esc(g.invoiceName || g.name)}</b></div><span class="inv-period">${jMonthsOf(v.rows)}</span></div>
+    ${g.phone || g.address ? `<div class="inv-meta">${g.phone ? `<bdi dir="ltr">${esc(g.phone)}</bdi>` : ''}${g.address ? `<span>${esc(g.address)}</span>` : ''}</div>` : ''}
+    <table class="inv-t"><thead><tr><th>جلسه</th><th>تاریخ</th><th>نوع</th><th>مبلغ (تومان)</th></tr></thead>
+      <tbody>${v.rows.map(r => `<tr class="${r.done ? '' : 'soon'}"><td>${fa(r.n)}</td><td>${jFull(r.e.date)}</td><td>${sessionKind(r.e)}</td><td>${r.price != null ? num(r.price) : '—'}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="3">جمع</td><td>${num(v.total)}</td></tr></tfoot></table>
+    <div class="inv-state ${v.s.paid ? 'ok' : ''}">${v.s.paid ? 'پرداخت شد' : 'در انتظار پرداخت'}</div>
+    ${pr.card || pr.iban ? `<div class="inv-pay">${pr.name ? `<b>${esc(pr.name)}</b>` : ''}${pr.card ? `<span>شمارهٔ کارت <bdi dir="ltr">${esc(pr.card)}</bdi></span>` : ''}${pr.iban ? `<span>شبا <bdi dir="ltr">${esc(pr.iban)}</bdi></span>` : ''}</div>` : ''}</div>`;
+}
+
+function invoiceText(v) {
+  const g = v.g, pr = profile();
+  return [`فاکتور جلسه‌های تمرین، ${g.invoiceName || g.name}`, jMonthsOf(v.rows), '',
+    ...v.rows.map(r => `${fa(r.n)}. ${jFull(r.e.date)}، ${sessionKind(r.e)}، ${r.price != null ? `${money(r.price)} تومان` : 'بدون قیمت'}`), '',
+    `جمع: ${money(v.total)} تومان`,
+    ...(pr.card || pr.iban ? ['', pr.name || '', pr.card ? `شمارهٔ کارت: ${pr.card}` : '', pr.iban ? `شبا: ${pr.iban}` : ''].filter((x, i) => i === 0 || x) : [])].join('\n');
+}
+
+// The invoice drawn as an image (for WhatsApp/Telegram), the same layout as on screen.
+async function invoiceImage(v) {
+  try { await Promise.all(['400 28px Vazirmatn', '700 28px Vazirmatn', '800 28px Vazirmatn'].map(f => document.fonts.load(f))); } catch { /* system font */ }
+  const g = v.g, pr = profile(), W = 1080, P = 64, RH = 74;
+  const hasPay = pr.card || pr.iban, H = 330 + (g.phone || g.address ? 60 : 0) + (v.rows.length + 2) * RH + 110 + (hasPay ? 190 : 0) + P;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  const C = { bg: '#FFFFFF', ink: '#1F2421', muted: '#696E69', sep: '#E7E7E2', fill: '#F3F3EF', sage: '#5E8A66', sageSoft: '#E8EFE8', burg: '#8E3349', burgSoft: '#F4E7EA' };
+  x.fillStyle = C.bg; x.fillRect(0, 0, W, H);
+  x.direction = 'rtl'; x.textBaseline = 'middle';
+  const text = (s, px, py, size, weight = 400, color = C.ink, align = 'right') => { x.font = `${weight} ${size}px Vazirmatn, sans-serif`; x.fillStyle = color; x.textAlign = align; x.fillText(s, px, py); };
+  let y = P + 20;
+  text('فاکتور جلسه‌های تمرین', W - P, y, 28, 600, C.muted); y += 58;
+  text(g.invoiceName || g.name, W - P, y, 48, 800);
+  text(jMonthsOf(v.rows), P, y, 30, 600, C.sage, 'left'); y += 60;
+  if (g.phone || g.address) { text([g.address, g.phone].filter(Boolean).join('، '), W - P, y, 26, 400, C.muted); y += 60; }
+  y += 20;
+  const cols = [W - P - 20, W - P - 150, W - P - 470, P + 20];
+  const head = ['جلسه', 'تاریخ', 'نوع', 'مبلغ (تومان)'];
+  x.fillStyle = C.sageSoft; x.beginPath(); x.roundRect(P, y, W - 2 * P, RH, 18); x.fill();
+  head.forEach((h, i) => text(h, cols[i], y + RH / 2, 26, 700, C.sage, i === 3 ? 'left' : 'right'));
+  y += RH;
+  v.rows.forEach((r, i) => {
+    if (i % 2) { x.fillStyle = C.fill; x.fillRect(P, y, W - 2 * P, RH); }
+    const col = r.done ? C.ink : C.muted;
+    text(fa(r.n), cols[0], y + RH / 2, 28, 700, col);
+    text(jFull(r.e.date), cols[1], y + RH / 2, 28, 400, col);
+    text(sessionKind(r.e), cols[2], y + RH / 2, 28, 400, col);
+    text(r.price != null ? money(r.price) : '—', cols[3], y + RH / 2, 28, 600, col, 'left');
+    y += RH;
+  });
+  x.strokeStyle = C.ink; x.lineWidth = 3; x.beginPath(); x.moveTo(P, y); x.lineTo(W - P, y); x.stroke();
+  text('جمع', cols[0], y + RH / 2 + 6, 32, 800);
+  text(money(v.total), cols[3], y + RH / 2 + 6, 36, 800, C.ink, 'left');
+  y += RH + 30;
+  const st = v.s.paid ? 'پرداخت شد' : 'در انتظار پرداخت';
+  x.font = '700 28px Vazirmatn, sans-serif'; const sw = x.measureText(st).width + 48;
+  x.fillStyle = v.s.paid ? C.sageSoft : C.burgSoft; x.beginPath(); x.roundRect(W - P - sw, y, sw, 56, 28); x.fill();
+  text(st, W - P - 24, y + 28, 28, 700, v.s.paid ? C.sage : C.burg); y += 90;
+  if (hasPay) {
+    if (pr.name) { text(pr.name, W / 2, y, 30, 700, C.ink, 'center'); y += 48; }
+    x.direction = 'ltr';
+    if (pr.card) { text(pr.card, W / 2, y, 32, 600, C.ink, 'center'); y += 48; }
+    if (pr.iban) { text(pr.iban, W / 2, y, 28, 400, C.muted, 'center'); y += 20; }
+  }
+  // Trim the canvas to what was drawn.
+  const out = document.createElement('canvas'); out.width = W; out.height = Math.ceil(y + P);
+  out.getContext('2d').drawImage(c, 0, 0);
+  return new Promise(res => out.toBlob(res, 'image/png'));
+}
+
+async function shareFile(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
 const sameDays = (a, b) => a.length === b.length && b.every(d => a.includes(d));
 
 function renderSheet() {
@@ -588,7 +752,7 @@ document.addEventListener('click', async ev => {
   if (act === 'tpl') { openSheet('tpl', { id: t.closest('[data-act]').dataset.id }); return; }
   if (act === 'group') { openSheet('group', { id: t.closest('[data-act]').dataset.id }); return; }
   if (act === 'group-new') { openSheet('groupEdit', { back: t.closest('[data-act]').dataset.back ? { ...s } : null }); return; }
-  if (act === 'group-edit') { openSheet('groupEdit', { id: s.id }); return; }
+  if (act === 'group-edit') { openSheet('groupEdit', { id: t.closest('[data-act]').dataset.id || s.id }); return; }
   if (act === 'series-new') { openSheet('seriesNew', { groupId: s.id, dayOff: 0 }); return; }
   if (act === 'series-edit') { openSheet('seriesNew', { groupId: s.id, id: t.closest('[data-act]').dataset.id }); return; }
   if (act === 'export') { exportBackup(); return; }
@@ -609,7 +773,47 @@ document.addEventListener('click', async ev => {
     renderSheet(); return;
   }
 
+  const hq = t.closest('[data-hcq]');
+  if (hq) {
+    const e = store.get(hq.dataset.hcq), n = +hq.dataset.n;
+    e.headcount = n; logChange(e, { headcount: n }); await store.put(e); await render(false);
+    toast(`ثبت شد: ${fa(n)} شاگرد، ${e.title}`, async () => { e.headcount = null; await store.put(e); render(false); });
+    return;
+  }
+  if (act === 'prices') { openSheet('prices', { id: t.closest('[data-act]').dataset.id, back: s ? { ...s } : null }); return; }
+  if (act === 'invoice') { openSheet('invoice', { id: t.closest('[data-act]').dataset.id }); return; }
+  if (act === 'profile') { openSheet('profile', { back: s ? { ...s } : null }); return; }
+  if (act === 'inv-image') { const v = invoiceOf(t.closest('[data-act]').dataset.id); toast('در حال ساختن تصویر…'); await shareFile(await invoiceImage(v), `فاکتور ${v.g.invoiceName || v.g.name}.png`); return; }
+  if (act === 'inv-text') { await copyText(invoiceText(invoiceOf(t.closest('[data-act]').dataset.id))); toast('متن فاکتور کپی شد'); return; }
+
   if (!s) return;
+
+  if (s.kind === 'prices') {
+    const sg = t.closest('[data-sugp]'); if (sg) { $(`#fP${sg.dataset.sugp}`).value = money(+sg.dataset.v); sg.remove(); return; }
+    if (act === 'save-prices') {
+      const g = store.get(s.id), by = {};
+      for (let n = 1; $(`#fP${n}`); n++) { const v = toNum($(`#fP${n}`).value); if (v) by[n] = v; }
+      const today = todayKey(), list = [...(g.prices || [])];
+      const from = list.length ? today : (groupStatus(g.id).current?.start || today);
+      const last = list[list.length - 1];
+      if (last && last.from >= from) last.by = by; else list.push({ from, by });
+      g.prices = list; await store.put(g); await render(false);
+      toast('قیمت‌ها ذخیره شد');
+      if (s.back) openSheet(s.back.kind, s.back); else closeSheet();
+      return;
+    }
+  }
+  if (s.kind === 'profile' && act === 'save-profile') {
+    const pr = profile();
+    Object.assign(pr, { name: $('#fPName').value.trim() || null, card: $('#fPCard').value.replace(/[^\d۰-۹ -]/g, '').trim() || null, iban: $('#fPIban').value.trim().toUpperCase() || null });
+    await store.put(pr); toast('ذخیره شد');
+    if (s.back) openSheet(s.back.kind, s.back); else closeSheet();
+    return;
+  }
+  if (s.kind === 'invoice') {
+    const pd = t.closest('[data-paid]');
+    if (pd) { const x = store.get(pd.dataset.paid); x.paid = !x.paid; await store.put(x); renderSheet(); await render(false); if (x.paid) island('پرداخت ثبت شد', store.get(x.groupId).name, '', 'دوره', 'تسویه شد'); return; }
+  }
 
   // add sheet
   if (s.kind === 'add') {
@@ -656,7 +860,7 @@ document.addEventListener('click', async ev => {
     const pc = t.closest('[data-pickcat]'); if (pc) { pc.parentNode.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c === pc)); s.cat = pc.dataset.pickcat; return; }
     if (act === 'save-item') {
       const start = toMin($('#fStart').value), end = Math.max(toMin($('#fEnd').value), start + 5);
-      await updateItem(e, x => { x.title = $('#fTitle').value.trim() || x.title; if (start !== x.start || end !== x.end) { delete x.untimed; delete x.estimated; } x.start = start; x.end = end; x.cat = s.cat || x.cat; x.note = $('#fNote').value.trim() || null; logChange(x, { edit: true }); });
+      await updateItem(e, x => { x.title = $('#fTitle').value.trim() || x.title; if (start !== x.start || end !== x.end) { delete x.untimed; delete x.estimated; } x.start = start; x.end = end; x.cat = s.cat || x.cat; x.note = $('#fNote').value.trim() || null; if ($('#fPrice')) x.price = toNum($('#fPrice').value); logChange(x, { edit: true }); });
       toast('ذخیره شد'); closeSheet(); return;
     }
     if (act === 'delete-item') {
@@ -712,7 +916,7 @@ document.addEventListener('click', async ev => {
     if (!name) { toast('نام را بنویس'); return; }
     const members = $('#fMembers').value.split(/[,،]/).map(x => x.trim()).filter(Boolean);
     const g = s.id ? store.get(s.id) : { id: uid(), kind: 'group' };
-    Object.assign(g, { name, members, place: $('#fPlace').value.trim() || null });
+    Object.assign(g, { name, members, place: $('#fPlace').value.trim() || null, invoiceName: $('#fInvName').value.trim() || null, phone: $('#fPhone').value.trim() || null, address: $('#fAddress').value.trim() || null });
     await store.put(g);
     if (!s.id) {
       const size = Math.max(1, toNum($('#fSize').value, 8)), doneBefore = Math.max(0, toNum($('#fDone').value, 0));
