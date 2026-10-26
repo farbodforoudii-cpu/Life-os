@@ -7,6 +7,7 @@ import {
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
+  minutesOf, timeLabel, timeRange,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -54,7 +55,7 @@ function itemHTML(e, compact = false) {
   }[st];
   return `<button class="item ${st === 'moved' ? 'cancelled' : st} ${compact ? 'compact' : ''} ${e.id === state.lastNew ? 'new' : ''}" data-open="${e.id}">
     <i class="dot" style="background:var(--c-${e.cat})"></i>
-    <span class="time">${fmtTime(e.start)}<small>${fmtTime(e.end)}</small></span>
+    <span class="time ${e.untimed ? 'nt' : ''}">${timeLabel(e)}<small>${e.untimed ? 'بدون ساعت' : fmtTime(e.end)}</small></span>
     <span class="txt"><span class="title">${esc(e.title)}</span>${compact ? '' : `<span class="sub">${esc(metaLine(e))}</span>`}</span>${compact ? '' : right}</button>`;
 }
 
@@ -122,8 +123,8 @@ function week() {
   let grid = ''; for (let h = 8; h < 24; h++) grid += `<i class="gridline" style="right:${pct(h * 60)}%"></i>`;
   const table = days.map((d, ri) => {
     const k = dayKey(d), items = entriesOn(k), isT = k === todayK;
-    const blocks = items.map(e => `<button class="blk ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}" title="${esc(e.title)}، ${fmtTime(e.start)} تا ${fmtTime(e.end)}"
-      style="--mark:var(--c-${e.cat});background:var(--t-${e.cat});right:calc(${pct(e.start)}% + 2px);width:calc(${pct(e.end) - pct(e.start)}% - 4px);animation-delay:${ri * 45}ms"><span>${esc(e.title)}</span><small>${fmtTime(e.start)}${headcount(e) != null ? `، ${fa(headcount(e))} نفر` : ''}</small></button>`).join('');
+    const blocks = items.map(e => `<button class="blk ${isActive(e) ? '' : 'cancelled'} ${e.untimed ? 'untimed' : ''}" data-open="${e.id}" title="${esc(e.title)}، ${timeRange(e)}"
+      style="--mark:var(--c-${e.cat});background:var(--t-${e.cat});right:calc(${pct(e.start)}% + 2px);width:calc(${pct(e.end) - pct(e.start)}% - 4px);animation-delay:${ri * 45}ms"><span>${esc(e.title)}</span><small>${timeLabel(e)}${headcount(e) != null ? `، ${fa(headcount(e))} نفر` : ''}</small></button>`).join('');
     return `<div class="wk-row ${isT ? 'today' : ''}"><div class="wk-day"><b>${weekdayName(d)}</b><span>${jDayMonth(d)}${isT ? '، امروز' : ''}</span></div>
       <div class="wk-track">${grid}${items.length ? blocks : '<div class="free">آزاد</div>'}${isT ? `<i class="nowline" style="right:${pct(m)}%"></i>` : ''}</div></div>`;
   }).join('');
@@ -132,9 +133,9 @@ function week() {
   const mini = days.map((d, ri) => {
     const k = dayKey(d), items = entriesOn(k), isT = k === todayK;
     return `<button class="mw-row ${isT ? 'today' : ''}" data-mw="${ri}"><span class="mw-day"><b>${weekdayName(d)}</b><span>${jDayMonth(d)}</span></span>
-      <span class="mw-track">${items.map(e => `<i class="mw-seg" style="right:${pct(e.start)}%;width:calc(${pct(e.end) - pct(e.start)}% - 2px);background:var(--c-${e.cat});${isActive(e) ? '' : 'opacity:.25;'}animation-delay:${ri * 50}ms"></i>`).join('')}${isT ? `<i class="nowline" style="right:${pct(m)}%"></i>` : ''}</span>
+      <span class="mw-track">${items.map(e => `<i class="mw-seg" style="right:${pct(e.start)}%;width:calc(${pct(e.end) - pct(e.start)}% - 2px);background:var(--c-${e.cat});${isActive(e) ? (e.untimed ? 'opacity:.45;' : '') : 'opacity:.25;'}animation-delay:${ri * 50}ms"></i>`).join('')}${isT ? `<i class="nowline" style="right:${pct(m)}%"></i>` : ''}</span>
       <span class="mw-n">${items.length ? fa(items.length) : 'آزاد'}</span></button>
-      <div class="mw-open" data-mwopen="${ri}"><div>${items.map(e => `<button class="mw-li ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><i class="dot" style="background:var(--c-${e.cat})"></i><b>${fmtTime(e.start)}</b><span>${esc(e.title)}</span></button>`).join('')}<div style="height:6px"></div></div></div>`;
+      <div class="mw-open" data-mwopen="${ri}"><div>${items.map(e => `<button class="mw-li ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><i class="dot" style="background:var(--c-${e.cat})"></i><b>${timeLabel(e)}</b><span>${esc(e.title)}</span></button>`).join('')}<div style="height:6px"></div></div></div>`;
   }).join('');
 
   return `<div class="head"><div><div class="eyebrow">${jDayMonth(days[0])} تا ${jDayMonth(days[6])}</div><h1 class="big">${label}</h1></div>
@@ -183,10 +184,10 @@ function report() {
   const done = all.filter(e => liveStatus(e, now) === 'done' || liveStatus(e, now) === 'now');
   const cancelled = all.filter(e => e.status === 'cancelled');
   const cnt = c => done.filter(e => e.cat === c).length;
-  const hours = c => done.filter(e => e.cat === c).reduce((s, e) => s + (e.end - e.start), 0) / 60;
+  const hours = c => done.filter(e => e.cat === c).reduce((s, e) => s + minutesOf(e), 0) / 60;
   const fh = h => '\u2066' + fa(Math.round(h * 10) / 10).replace('.', '٫') + '\u2069';
   const shiftTitles = [...new Set(done.filter(e => e.cat === 'shift').map(e => e.title))];
-  const perShift = shiftTitles.map(t => { const xs = done.filter(e => e.cat === 'shift' && e.title === t); const ppl = xs.reduce((s, e) => s + (e.headcount || 0), 0); return { t, n: xs.length, ppl }; });
+  const perShift = shiftTitles.map(t => { const xs = done.filter(e => e.cat === 'shift' && e.title === t); const known = xs.filter(e => e.headcount != null), ppl = known.reduce((s, e) => s + e.headcount, 0); return { t, n: xs.length, k: known.length, ppl }; });
   const perGroup = groups().map(g => ({ g, n: done.filter(e => e.groupId === g.id).length, c: cancelled.filter(e => e.groupId === g.id).length })).filter(x => x.n || x.c);
   const places = [...done.filter(e => e.cat === 'personal').reduce((m, e) => m.set(e.title, (m.get(e.title) || 0) + 1), new Map())].sort((a, b) => b[1] - a[1]).slice(0, 8);
   const seg = `<div class="seg">${[['week', 'هفته'], ['month', 'ماه'], ['year', 'سال']].map(([v, l]) => `<button class="${state.reportRange === v ? 'on' : ''}" data-range="${v}">${l}</button>`).join('')}</div>`;
@@ -194,11 +195,12 @@ function report() {
   if (!all.length) return head + empty('هنوز داده‌ای برای این بازه نیست', 'گزارش فقط از ثبت‌های واقعی ساخته می‌شود.');
   const cats = Object.keys(CATS);
   const totalH = cats.reduce((s, c) => s + hours(c), 0);
+  const estH = done.filter(e => e.estimated).reduce((s, e) => s + minutesOf(e), 0) / 60, untimedN = done.filter(e => e.untimed).length;
   const N = reportNews(done, cancelled, all, perGroup, hours, fh);
   // Stats bento: one big number with a hatched corner, a wide tile with the range growing day by day,
   // then three small counts.
   const days = [...new Set(all.map(e => e.date))].sort(), cum = [];
-  let acc = 0; for (const k of days) { acc += done.filter(e => e.date === k && (e.cat === 'client' || e.cat === 'shift')).reduce((s2, e) => s2 + (e.end - e.start) / 60, 0); cum.push(acc); }
+  let acc = 0; for (const k of days) { acc += done.filter(e => e.date === k && (e.cat === 'client' || e.cat === 'shift')).reduce((s2, e) => s2 + minutesOf(e) / 60, 0); cum.push(acc); }
   const bars = Array.from({ length: 11 }, (_, i) => cum.length ? cum[Math.round(i * (cum.length - 1) / 10)] : 0), bmx = Math.max(1, ...bars);
   return head + `<div class="sb stagger">
       <div class="sb-main"><div class="hatch"></div><span class="sb-pill"><i class="pulse"></i>جلسهٔ مراجع</span><div class="num" data-count="${cnt('client')}">۰</div><p>${fh(hours('client'))} ساعت جلسه${perGroup.length ? ` با ${fa(perGroup.length)} مراجع` : ''}.</p></div>
@@ -212,11 +214,11 @@ function report() {
       <div class="w"><h3>زمان کجا رفت</h3>
         <div class="stack" role="img" aria-label="${cats.map(c => `${CATS[c]} ${fh(hours(c))} ساعت`).join('، ')}">${cats.filter(c => hours(c) > 0).map((c, i) => `<div title="${CATS[c]}، ${fh(hours(c))} ساعت" style="flex:${hours(c)};background:var(--c-${c});animation-delay:${i * .1}s"></div>`).join('')}</div>
         <div class="lg2" style="margin-top:6px">${cats.map(c => `<span><i style="background:var(--c-${c})"></i>${CATS[c]}<b>${fh(hours(c))} ساعت</b></span>`).join('')}</div>
-        <div class="note">مجموع ${fh(totalH)} ساعت ثبت‌شده</div></div>
+        <div class="note">مجموع ${fh(totalH)} ساعت ثبت‌شده${estH ? `؛ ${fh(estH)} ساعت آن تخمینی است (ساعت معمول همان جلسه یا شیفت)` : ''}${untimedN ? `. ${fa(untimedN)} مورد بدون ساعت در این جمع نیامده است` : ''}</div></div>
       <div class="w"><h3>جلسه‌ها به تفکیک مراجع</h3>
         ${perGroup.length ? perGroup.slice().sort((x, y) => y.n - x.n).map((x, i, arr) => `<div class="act"><div class="act-top"><span>${esc(x.g.name)}</span><b>${fa(x.n)}${x.c ? `<em>، ${fa(x.c)} لغو</em>` : ''}</b></div><div class="act-bar"><i style="width:${(x.n / Math.max(1, arr[0].n) * 100).toFixed(0)}%;animation-delay:${(.3 + i * .07).toFixed(2)}s"></i></div></div>`).join('') : '<div class="note">—</div>'}</div>
       <div class="w"><h3>شاگردهای شیفت‌ها</h3>
-        ${perShift.length ? perShift.map(x => `<div class="rrow"><span>${esc(x.t)}</span><b>${fa(x.ppl)} نفر</b><em>${fa(x.n)} شیفت${x.n ? `، میانگین ${fa(Math.round(x.ppl / x.n * 10) / 10).replace('.', '٫')}` : ''}</em></div>`).join('') : '<div class="note">—</div>'}</div>
+        ${perShift.length ? perShift.map(x => `<div class="rrow"><span>${esc(x.t)}</span><b>${x.k ? `${fa(x.ppl)} نفر` : '—'}</b><em>${fa(x.n)} شیفت${x.k ? `، میانگین ${fa(Math.round(x.ppl / x.k * 10) / 10).replace('.', '٫')} (از ${fa(x.k)} شیفت با تعداد ثبت‌شده)` : '، تعداد شاگردها ثبت نشده'}</em></div>`).join('') : '<div class="note">—</div>'}</div>
       <div class="w"><h3>رفت‌وآمدها و کارهای شخصی</h3>
         ${places.length ? `<div class="chips">${places.map(([t, n]) => `<span class="chip" style="min-height:34px;padding:6px 12px;font-size:13px">${esc(t)}، ${fa(n)}</span>`).join('')}</div>` : '<div class="note">—</div>'}</div>
     </div>`;
@@ -229,11 +231,11 @@ function reportNews(done, cancelled, all, perGroup, hours, fh) {
   else if (done.some(e => e.cat === 'client')) N.push({ k: 'پرداخت', t: 'همهٔ جلسه‌ها تسویه شده', d: 'هیچ جلسهٔ تمام‌شده‌ای منتظر پرداخت نیست.', tone: 'g' });
   const top = perGroup.slice().sort((a, b) => b.n - a.n)[0];
   if (top && perGroup.length > 1) N.push({ k: 'مراجع', t: `${top.g.name}، بیشترین جلسه با ${fa(top.n)} بار`, d: `از ${fa(perGroup.length)} مراجع در این بازه.` });
-  const wd = new Map(); for (const e of done.filter(e => e.cat === 'client' || e.cat === 'shift')) { const w = weekdayName(fromDayKey(e.date)); wd.set(w, (wd.get(w) || 0) + (e.end - e.start) / 60); }
+  const wd = new Map(); for (const e of done.filter(e => e.cat === 'client' || e.cat === 'shift')) { const w = weekdayName(fromDayKey(e.date)); wd.set(w, (wd.get(w) || 0) + minutesOf(e) / 60); }
   const busy = [...wd].sort((a, b) => b[1] - a[1])[0];
   if (busy && wd.size > 1) N.push({ k: 'زمان', t: `پرکارترین روز: ${busy[0]}‌ها`, d: `جمعاً ${fh(busy[1])} ساعت جلسه و شیفت.` });
   const work = hours('client') + hours('shift'), pers = hours('personal');
-  if (work) N.push({ k: 'تعادل', t: `${fh(pers)} ساعت برای خودت`, d: `در برابر ${fh(work)} ساعت کار (جلسه + شیفت).` });
+  if (work) N.push({ k: 'تعادل', t: `${fh(pers)} ساعت برای خودت`, d: `در برابر ${fh(work)} ساعت کار (جلسه + شیفت).${done.some(e => e.untimed && e.cat === 'personal') ? ` ${fa(done.filter(e => e.untimed && e.cat === 'personal').length)} کار شخصی بدون ساعت در این جمع نیامده است.` : ''}` });
   if (cancelled.length >= 2) N.push({ k: 'لغو', t: `${fa(cancelled.length)} لغو`, d: `${fa(Math.round(cancelled.length / all.length * 100))}٪ برنامه‌ها = لغو ÷ همهٔ برنامه‌های این بازه.`, tone: 'r' });
   return N;
 }
@@ -360,7 +362,7 @@ const SHEETS = {
     const absent = new Set(e.absent || []);
     const stateLine = { done: 'انجام شد', now: 'الان در جریانه', planned: 'برنامه‌ریزی‌شده', cancelled: `لغو شد${e.reason ? `، ${e.reason}` : ''}`, moved: 'جابه‌جا شد' }[st];
     let body = `<div class="it-head"><i class="dot" style="background:var(--c-${e.cat});width:12px;height:12px;border-radius:6px"></i>
-      <div><div class="it-title">${esc(e.title)}</div><div class="eyebrow">${weekdayName(d)} ${jDayMonth(d)}، ${fmtTime(e.start)} تا ${fmtTime(e.end)}، ${stateLine}</div>
+      <div><div class="it-title">${esc(e.title)}</div><div class="eyebrow">${weekdayName(d)} ${jDayMonth(d)}، ${timeRange(e)}، ${stateLine}</div>
       ${info ? `<div class="eyebrow" style="color:var(--sage)">${info.n ? `جلسهٔ ${fa(info.n)} از ${fa(info.size)}` : 'خارج از دوره؛ دورهٔ جدید لازم است'}</div>` : ''}</div></div>`;
     if (g && g.members && g.members.length) {
       body += `<div class="eyebrow">حاضرها (${fa(hc)} از ${fa(g.members.length)})؛ روی غایب‌ها بزن</div>
@@ -653,7 +655,7 @@ document.addEventListener('click', async ev => {
     const pc = t.closest('[data-pickcat]'); if (pc) { pc.parentNode.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c === pc)); s.cat = pc.dataset.pickcat; return; }
     if (act === 'save-item') {
       const start = toMin($('#fStart').value), end = Math.max(toMin($('#fEnd').value), start + 5);
-      await updateItem(e, x => { x.title = $('#fTitle').value.trim() || x.title; x.start = start; x.end = end; x.cat = s.cat || x.cat; x.note = $('#fNote').value.trim() || null; logChange(x, { edit: true }); });
+      await updateItem(e, x => { x.title = $('#fTitle').value.trim() || x.title; if (start !== x.start || end !== x.end) { delete x.untimed; delete x.estimated; } x.start = start; x.end = end; x.cat = s.cat || x.cat; x.note = $('#fNote').value.trim() || null; logChange(x, { edit: true }); });
       toast('ذخیره شد'); closeSheet(); return;
     }
     if (act === 'delete-item') {

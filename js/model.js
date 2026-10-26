@@ -77,6 +77,11 @@ export function liveStatus(e, now = new Date()) {
   if (e.start <= m) return 'now';
   return 'planned';
 }
+// Imported history: `untimed` entries had no hour written (kept in order, never counted as hours);
+// `estimated` ones got the usual hour of that session or shift.
+export const minutesOf = e => e.untimed ? 0 : e.end - e.start;
+export const timeLabel = e => e.untimed ? '—' : (e.estimated ? '≈' : '') + fmtTime(e.start);
+export const timeRange = e => e.untimed ? 'ساعت ثبت نشده' : `${e.estimated ? 'حدود ' : ''}${fmtTime(e.start)} تا ${fmtTime(e.end)}`;
 export const isActive = e => e.status !== 'cancelled' && e.status !== 'moved';
 export const byTime = (a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end;
 export const entriesOn = k => store.all('entry').filter(e => e.date === k).sort(byTime);

@@ -406,3 +406,5 @@ input{font-family:inherit}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .sb-main{background:#24332a;color:var(--ink)}}
 :root[data-theme="dark"] .sb-main{background:#24332a;color:var(--ink)}
 .sb-bars i{background:var(--sage)}
+.item .time.nt{color:var(--muted);font-weight:500}
+.blk.untimed{background:transparent!important;outline:1.5px dashed color-mix(in srgb,var(--mark) 55%,transparent);outline-offset:-1.5px}
