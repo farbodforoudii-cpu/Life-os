@@ -200,11 +200,24 @@ export function lastHeadcount(title, beforeKey) {
   return prev ? prev.headcount : null;
 }
 
+// How long a new item usually lasts: the most common length of earlier timed items with the same client
+// or title, then the weekly pattern, then a plain default per category.
+const DEFAULT_MINUTES = { client: 90, shift: 90, uni: 60, personal: 60 };
+export function usualMinutes({ title, cat, groupId }) {
+  const same = x => (groupId ? x.groupId === groupId : x.title === title);
+  const counts = new Map();
+  for (const e of store.all('entry')) if (same(e) && !e.untimed && e.end > e.start) counts.set(e.end - e.start, (counts.get(e.end - e.start) || 0) + 1);
+  if (counts.size) return [...counts].sort((a, b) => b[1] - a[1])[0][0];
+  const tpl = store.all('template').find(x => !x.deleted && same(x));
+  return tpl ? tpl.end - tpl.start : DEFAULT_MINUTES[cat] || 60;
+}
+
 // Frequent titles first, then the generic defaults that are not already in the list.
 export function learnedPresets(limit = 10) {
-  const counts = new Map();
+  // What was actually done in the last three months, typed by hand or brought in from the old schedule.
+  const counts = new Map(), since = dayKey(addDays(new Date(), -90));
   for (const e of store.all('entry')) {
-    if (e.source !== 'manual' || e.groupId || e.movedFrom) continue;
+    if ((e.source !== 'manual' && e.source !== 'import') || e.groupId || e.movedFrom || e.date < since) continue;
     const c = counts.get(e.title) || { title: e.title, cat: e.cat, n: 0 };
     c.n++;
     counts.set(e.title, c);

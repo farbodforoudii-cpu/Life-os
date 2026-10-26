@@ -7,7 +7,7 @@ import {
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange,
+  minutesOf, timeLabel, timeRange, usualMinutes,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -332,7 +332,8 @@ function closeSheet() {
 const sheetHead = (title, extra = '') => `<div class="grab"></div><div class="sh-head"><b>${title}</b><span style="display:flex;align-items:center;gap:10px">${extra}<button class="close" data-act="close" aria-label="بستن"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span></div>`;
 const dayChips = (sel, attr = 'data-pickday') => `<div class="chips">${Array.from({ length: 8 }, (_, i) => i - 1).map(off => { const d = addDays(new Date(), off); return `<button class="chip ${off === sel ? 'sel' : ''}" ${attr}="${off}">${off === 0 ? 'امروز' : off === 1 ? 'فردا' : off === -1 ? 'دیروز' : weekdayName(d)} <span class="soft">${jDayMonth(d)}</span></button>`; }).join('')}</div>`;
 const catChips = sel => `<div class="chips">${Object.entries(CATS).map(([c, l]) => `<button class="chip ${sel === c ? 'sel' : ''}" data-pickcat="${c}"><i class="dot" style="background:var(--c-${c})"></i>${l}</button>`).join('')}</div>`;
-const timeInputs = (s, e) => `<div class="times"><label>شروع<input type="time" id="fStart" value="${toHHMM(s)}"></label><label>پایان<input type="time" id="fEnd" value="${toHHMM(e)}"></label></div>`;
+// With `auto`, the end stays «usual length» until it is changed by hand.
+const timeInputs = (s, e, auto = false) => `<div class="times"><label>شروع<input type="time" id="fStart" value="${toHHMM(s)}"></label><label>پایان<input type="time" id="fEnd" value="${auto ? '' : toHHMM(e)}"${auto ? ' data-auto="1"' : ''}></label></div>${auto ? '<div class="eyebrow" id="autoHint">اگر پایان خالی بماند، مدت معمول همان کار در نظر گرفته می‌شود.</div>' : ''}`;
 
 const SHEETS = {
   add(s) {
@@ -343,7 +344,7 @@ const SHEETS = {
     const gs = groups();
     return sheetHead('افزودن', `<span class="eyebrow">${isToday ? `الان ${fmtTime(m)}` : ''}</span>`) + `
       ${dayChips(s.dayOff)}
-      ${timeInputs(start, end)}
+      ${timeInputs(start, end, s.end == null)}
       <div class="eyebrow">یه لمس = ثبت</div>
       <div class="chips">${learnedPresets().map(p => `<button class="chip" data-quick="${esc(p.title)}" data-cat="${p.cat}"><i class="dot" style="background:var(--c-${p.cat})"></i>${esc(p.title)}</button>`).join('')}</div>
       ${gs.length ? `<div class="eyebrow">جلسهٔ مراجع (مثلاً جبرانی)</div><div class="chips">${gs.map(g => `<button class="chip" data-quickgroup="${g.id}"><i class="dot" style="background:var(--c-client)"></i>${esc(g.name)}</button>`).join('')}</div>` : ''}
@@ -507,7 +508,7 @@ async function addEntry(f) {
   const s = state.sheet;
   const k = dayKey(addDays(new Date(), s.dayOff));
   let start = toMin($('#fStart').value), end = toMin($('#fEnd').value);
-  if (end <= start) end = Math.min(start + 60, END_OF_DAY);
+  if ($('#fEnd').dataset.auto || !$('#fEnd').value || end <= start) end = Math.min(start + usualMinutes(f), END_OF_DAY);
   const e = newEntry({ date: k, start, end, ...f });
   await store.put(e);
   state.lastNew = e.id;
@@ -517,7 +518,7 @@ async function addEntry(f) {
   await render(false);
   setTimeout(() => { state.lastNew = null; }, 700);
   island(e.title, CATS[e.cat], fmtTime(e.start), s.dayOff === 0 ? 'امروز' : weekdayName(fromDayKey(k)), `${fa(entriesOn(k).filter(isActive).length)} برنامه`);
-  toast(`ثبت شد: ${e.title}، ${s.dayOff === 0 ? '' : weekdayName(fromDayKey(k)) + ' '}${fmtTime(e.start)}`, async () => { await store.remove(e); render(false); });
+  toast(`ثبت شد: ${e.title}، ${s.dayOff === 0 ? '' : weekdayName(fromDayKey(k)) + ' '}${fmtTime(e.start)} تا ${fmtTime(e.end)}`, async () => { await store.remove(e); render(false); });
 }
 
 async function updateItem(e, fn, msg, undoFn) {
@@ -612,7 +613,7 @@ document.addEventListener('click', async ev => {
 
   // add sheet
   if (s.kind === 'add') {
-    const pd = t.closest('[data-pickday]'); if (pd) { s.dayOff = +pd.dataset.pickday; s.start = toMin($('#fStart').value); s.end = toMin($('#fEnd').value); renderSheet(); return; }
+    const pd = t.closest('[data-pickday]'); if (pd) { s.dayOff = +pd.dataset.pickday; s.start = toMin($('#fStart').value); s.end = $('#fEnd').dataset.auto ? null : toMin($('#fEnd').value); renderSheet(); return; }
     const pc = t.closest('[data-pickcat]'); if (pc) { s.cat = pc.dataset.pickcat; pc.parentNode.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c === pc)); return; }
     const q = t.closest('[data-quick]'); if (q) { addEntry({ title: q.dataset.quick, cat: q.dataset.cat }); return; }
     const qg = t.closest('[data-quickgroup]'); if (qg) { const g = store.get(qg.dataset.quickgroup); addEntry({ title: g.name, cat: 'client', groupId: g.id }); return; }
@@ -760,6 +761,9 @@ document.addEventListener('submit', async ev => {
 
 document.addEventListener('change', ev => {
   if (ev.target.id === 'importFile' && ev.target.files[0]) importFile(ev.target.files[0]);
+});
+document.addEventListener('input', ev => {
+  if (ev.target.id === 'fEnd' && ev.target.dataset.auto && ev.target.value) { delete ev.target.dataset.auto; $('#autoHint')?.remove(); }
 });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeSheet(); });
 addEventListener('resize', movePill);
