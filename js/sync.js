@@ -1,5 +1,6 @@
 // Two-way sync with Supabase over plain REST: push local changes, pull anything newer.
 // Each record is stored whole as JSON; the newest updatedAt wins on both sides.
+// The table is shared with hesab-man (app = 'hesab'); this app only reads its own rows.
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { db } from './db.js';
 import { store } from './store.js';
@@ -86,7 +87,7 @@ export const sync = {
       // Pull first so a newer remote copy is never overwritten by an older local one.
       let more = true;
       while (more) {
-        const q = `/rest/v1/life_items?select=data,server_updated_at&order=server_updated_at.asc&limit=500${state.cursor ? `&server_updated_at=gt.${encodeURIComponent(state.cursor)}` : ''}`;
+        const q = `/rest/v1/life_items?select=data,server_updated_at&app=eq.life&order=server_updated_at.asc&limit=500${state.cursor ? `&server_updated_at=gt.${encodeURIComponent(state.cursor)}` : ''}`;
         const rows = await call(q);
         if (rows.length) {
           await store.merge(rows.map(r => r.data));
@@ -100,7 +101,7 @@ export const sync = {
         const chunk = out.slice(i, i + 200);
         await call('/rest/v1/life_items?on_conflict=user_id,id', {
           method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
-          body: chunk.map(it => ({ user_id: state.session.user.id, id: it.id, kind: it.kind, data: it })),
+          body: chunk.map(it => ({ user_id: state.session.user.id, id: it.id, kind: it.kind, app: 'life', data: it })),
         });
         await store.clean(chunk.map(it => ({ id: it.id, updatedAt: it.updatedAt })));
       }
