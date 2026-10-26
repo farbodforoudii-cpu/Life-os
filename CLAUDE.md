@@ -72,8 +72,13 @@ design and working rules below; hesab-man is the reference when in doubt.
    «قیمت وارد نشده — بزن تا وارد کنی». With prices: income per client, unpaid amount, month total. Ask Farbod to
    enter prices once this ships.
 
-### Phase 3 — link with hesab-man (decide later, only if Farbod wants it)
-iOS gives each home-screen web app its own storage and opens links in Safari, so the two installed apps cannot
-share data. Real linking (e.g. «پرداخت شد» on a session automatically recording income in hesab-man) needs both
-apps inside **one installed PWA with two sections**. Big change — propose, don't do, until asked.
-hesab-man already accepts an add-link: `…/hesab-man/#add?amount=&what=&dir=in&period=1405-08`.
+### Phase 3 — link with hesab-man (decided 1405/08/04: two separate apps, one shared server)
+Farbod chose to keep the two apps separate and link them through the shared Supabase project instead of merging
+them into one PWA (which the iOS storage limit would otherwise require).
+- Both apps sync into `public.life_items`; column `app` = `life` | `hesab`. Each app pulls only its own rows today.
+  hesab-man sync lives on its branch `claude/daily-schedule-web-app-xucjy8` until Farbod merges it.
+- Next steps, in order: (a) prices on groups/series in life-os; (b) life-os writes «طلب» / expense drafts that
+  hesab-man shows in an inbox for **one-tap confirmation** (money is never recorded silently); (c) a payment
+  confirmed in hesab-man marks the package/session paid in life-os; (d) a shared monthly report (hours, sessions,
+  income, income per hour, open receivables).
+- Details of the sync format: hesab-man `docs/ECOSYSTEM.md`.
