@@ -1035,6 +1035,21 @@ let billTimer;
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearTimeout(billTimer); billTimer = setTimeout(refreshBills, 3000); } });
 sync.onChange(() => { const dot = document.querySelector('.sync-dot'); if (dot) dot.className = `sync-dot ${sync.state.status}`; if (state.sheet?.kind === 'settings') renderSheet(); });
 
+// A new release takes over by itself: the app checks for one whenever it comes back, and reloads once
+// it is installed (waiting while a sheet is open so nothing typed is lost).
+function setupUpdates() {
+  if (!('serviceWorker' in navigator)) return;
+  let reloading = false;
+  const swap = () => { if (reloading) return; if (!state.sheet) { reloading = true; location.reload(); } else setTimeout(swap, 4000); };
+  if (navigator.serviceWorker.controller) navigator.serviceWorker.addEventListener('controllerchange', swap);
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const check = () => { if (navigator.onLine) reg.update().catch(() => {}); };
+    addEventListener('online', check);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    check();
+  }).catch(() => {});
+}
+
 // ---------- boot ----------
 (async function boot() {
   renderTabs();
@@ -1044,5 +1059,5 @@ sync.onChange(() => { const dot = document.querySelector('.sync-dot'); if (dot) 
   requestPersistence();
   // Bills are written after the first pull, so a payment answered in «حساب من» is seen first.
   sync.run().then(() => refreshBills());
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  setupUpdates();
 })();
