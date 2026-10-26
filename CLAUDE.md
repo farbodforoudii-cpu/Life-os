@@ -9,7 +9,8 @@ design and working rules below; hesab-man is the reference when in doubt.
 - Vanilla JS ES modules, no build step, no framework. Offline PWA. Font: Vazirmatn (`fonts/`).
 - Files: `js/app.js` (all screens, sheets, events), `js/model.js` (dates, status, groups/series, presets),
   `js/store.js` (in-memory store over IndexedDB, tombstone deletes), `js/db.js` (IndexedDB `life-os` v2, stores
-  `items`, `kv`), `js/sync.js` + `js/config.js` (optional two-way Supabase sync, table `life_items`, RLS),
+  `items`, `kv`), `js/sync.js` + `js/config.js` (optional two-way Supabase sync joined by a 25-character sync code; RPC
+  `eco_pull` / `eco_push` over table `eco_items`, closed to direct access),
   `js/jalali.js`, `sw.js` (cache-first shell).
 - Item kinds in the store: `entry` (one block of time), `template` (weekly pattern, even/odd days), `group`
   (a client or class group with members), `series` (a package of N sessions for a group, `paid` flag).
@@ -75,8 +76,9 @@ design and working rules below; hesab-man is the reference when in doubt.
 ### Phase 3 — link with hesab-man (decided 1405/08/04: two separate apps, one shared server)
 Farbod chose to keep the two apps separate and link them through the shared Supabase project instead of merging
 them into one PWA (which the iOS storage limit would otherwise require).
-- Both apps sync into `public.life_items`; column `app` = `life` | `hesab`. Each app pulls only its own rows today.
-  hesab-man sync lives on its branch `claude/daily-schedule-web-app-xucjy8` until Farbod merges it.
+- Both apps sync into `public.eco_items` (one space per sync code; the server stores only the code's SHA-256);
+  column `app` = `life` | `hesab`. Each app pulls only its own rows today. One code joins every device and both apps
+  (1405/08/04: Farbod chose a code over email/password for simplicity). `public.life_items` is the old, unused table.
 - Next steps, in order: (a) prices on groups/series in life-os; (b) life-os writes «طلب» / expense drafts that
   hesab-man shows in an inbox for **one-tap confirmation** (money is never recorded silently); (c) a payment
   confirmed in hesab-man marks the package/session paid in life-os; (d) a shared monthly report (hours, sessions,

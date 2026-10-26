@@ -466,16 +466,16 @@ const SHEETS = {
     const statusText = { off: 'خاموش', idle: st.lastSync ? `همگام، ${new Date(st.lastSync).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : 'آماده', syncing: 'در حال همگام‌سازی…', error: 'خطا', offline: 'آفلاین؛ بعداً همگام می‌شود' }[st.status];
     const dirty = store.dirtyItems().length;
     return sheetHead('تنظیمات') + `
-      <div class="sh-sub"><b>همگام‌سازی iPad و آیفون</b><span class="sync-badge ${st.status}">${statusText}</span></div>
-      ${st.session ? `<p class="hint">وارد شدی با ${esc(st.session.user.email)}.${dirty ? ` ${fa(dirty)} تغییر منتظر ارسال.` : ''}</p>
-        ${st.error ? `<p class="err">${esc(st.error)}</p>` : ''}
-        <button class="wide-btn" data-act="sync-now">همگام‌سازی الان</button>
-        <button class="wide-btn ghost" data-act="sign-out">خروج از حساب</button>`
-      : `<p class="hint">روی هر دو دستگاه با یک ایمیل و رمز وارد شو؛ از آن به بعد همه‌چیز خودکار یکی می‌شود. اپ بدون اینترنت هم کار می‌کند و بعداً همگام می‌شود.</p>
-        ${st.error ? `<p class="err">${esc(st.error)}</p>` : ''}
-        <form data-form="auth" class="auth"><label class="fld">ایمیل<input id="aEmail" type="email" autocomplete="username" inputmode="email" dir="ltr"></label>
-        <label class="fld">رمز (حداقل ۶ حرف)<input id="aPass" type="password" autocomplete="current-password" dir="ltr"></label>
-        <button class="wide-btn" type="submit" data-mode="in">ورود</button><button class="wide-btn ghost" type="submit" data-mode="up">ساختن حساب (بار اول)</button></form>`}
+      <div class="sh-sub"><b>همگام‌سازی آیفون، آیپد و «حساب من»</b><span class="sync-badge ${st.status}">${statusText}</span></div>
+      ${st.error ? `<p class="err">${esc(st.error)}</p>` : ''}
+      ${st.key ? `<p class="hint">${dirty ? `${fa(dirty)} تغییر در انتظار ارسال. ` : ''}برای افزودن دستگاه دیگر یا «حساب من»: «کپی کد» را بزنید و آن‌جا «چسباندن کد». کد را مانند رمز نگه دارید.</p>
+        <button class="wide-btn ghost" data-act="sync-copy" style="gap:12px">کپی کد برای دستگاه دیگر<span class="soft" dir="ltr">${esc(st.key.slice(0, 5))}-•••••</span></button>
+        <button class="wide-btn" data-act="sync-now">همگام‌سازی اکنون</button>
+        <button class="wide-btn danger" data-act="sign-out">خاموش کردن روی این دستگاه</button>`
+      : `<p class="hint">بدون ایمیل و رمز. اگر در «حساب من» یا دستگاه دیگری همگام‌سازی روشن است، کد را از آن‌جا کپی کنید و این‌جا «چسباندن کد» را بزنید؛ وگرنه «روشن کردن» یک کد تازه می‌سازد.</p>
+        <label class="fld">کد همگام‌سازی<input id="syncCode" dir="ltr" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"></label>
+        <button class="wide-btn" data-act="sync-paste">چسباندن کد و اتصال</button>
+        <button class="wide-btn ghost" data-act="sync-new">روشن کردن همگام‌سازی (نخستین دستگاه)</button>`}
       <div class="sh-sub"><b>پشتیبان و سوابق</b></div>
       <button class="wide-btn ghost" data-act="export">گرفتن فایل پشتیبان</button>
       <label class="wide-btn ghost file">بازکردن فایل پشتیبان یا سوابق<input type="file" id="importFile" accept="application/json,.json"></label>
@@ -515,6 +515,11 @@ async function updateItem(e, fn, msg, undoFn) {
   await render(false);
   if (state.sheet) renderSheet();
   if (msg) toast(msg, async () => { Object.assign(e, before); await store.put(e); if (undoFn) await undoFn(); await render(false); if (state.sheet) renderSheet(); });
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { prompt('کد را کپی کنید:', text); }
 }
 
 async function exportBackup() {
@@ -574,7 +579,21 @@ document.addEventListener('click', async ev => {
   if (act === 'series-new') { openSheet('seriesNew', { groupId: s.id, dayOff: 0 }); return; }
   if (act === 'export') { exportBackup(); return; }
   if (act === 'sync-now') { await sync.run(); renderSheet(); return; }
-  if (act === 'sign-out') { await sync.signOut(); renderSheet(); return; }
+  if (act === 'sign-out') { if (!confirm('همگام‌سازی روی این دستگاه خاموش شود؟ داده‌های این دستگاه می‌مانند.')) return; await sync.signOut(); renderSheet(); return; }
+  if (act === 'sync-copy') { await copyText(sync.state.key); toast('کد کپی شد'); return; }
+  if (act === 'sync-new') {
+    try { const code = await sync.create(); await copyText(code); toast('همگام‌سازی روشن شد و کد کپی شد'); await render(false); }
+    catch (e) { sync.state.error = e.message; }
+    renderSheet(); return;
+  }
+  if (act === 'sync-paste') {
+    const box = $('#syncCode');
+    // An empty box reads the clipboard (iOS shows its «Paste» bubble); a typed code is used as is.
+    if (!box.value.trim()) { try { box.value = await navigator.clipboard.readText(); } catch { toast('کد را در کادر بچسبانید و دوباره بزنید'); return; } }
+    try { await sync.join(box.value); toast('به همگام‌سازی وصل شد'); await render(false); }
+    catch (e) { sync.state.error = e.message; }
+    renderSheet(); return;
+  }
 
   if (!s) return;
 
@@ -713,20 +732,6 @@ document.addEventListener('submit', async ev => {
   if (f === 'typed') {
     const title = $('#typedIn').value.trim();
     if (title) addEntry({ title, cat: state.sheet.cat || 'personal' });
-  }
-  if (f === 'auth') {
-    const mode = ev.submitter?.dataset.mode || 'in';
-    const email = $('#aEmail').value.trim(), pass = $('#aPass').value;
-    try {
-      if (mode === 'up') {
-        const r = await sync.signUp(email, pass);
-        if (r === 'confirm') { toast('ایمیل تأیید فرستاده شد؛ لینکش را بزن و بعد «ورود»'); renderSheet(); return; }
-      } else await sync.signIn(email, pass);
-      renderSheet();
-      await sync.run();
-      await render(false);
-      renderSheet();
-    } catch (e) { sync.state.error = e.message; renderSheet(); }
   }
 });
 
