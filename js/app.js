@@ -7,7 +7,7 @@ import {
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, shiftPay, shiftRate, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
+  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, shiftPay, shiftRate, GORDAN_RE, gordan, gordanMonth, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -199,12 +199,17 @@ function clients() {
         <span class="cl2-pills">${pn ? `<i class="pl">${short(pn.v)} هر جلسه${Object.keys(pn.row.by).length > 1 ? `، ${pn.n === 1 ? 'خصوصی' : `${fa(pn.n)} نفر`}` : ''}</i>` : '<i class="pl dim">قیمت وارد نشده</i>'}${o ? `<i class="pl r">${short(o)} پرداخت نشده</i>` : cur && cur.paid ? '<i class="pl g">پرداخت شده</i>' : ''}</span></span>
       <span class="cl2-go" aria-hidden="true">‹</span></button>`;
   }).join('');
-  // Shifts: how many this month, and what one pays (optional; used in the month's forecast).
+  // Shifts: Gordan by students × average share, with what Gordan really paid per month; others by a pay per shift.
   const titles = [...new Set(store.all('template').filter(t => t.cat === 'shift' && !t.until).map(t => t.title))];
-  const shiftsH = titles.length ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌ها</b><span class="eyebrow">مبلغ هر شیفت برای پیش‌بینی درآمد ماه</span></div>${titles.map(t => {
+  const G = gordan(), mName = x => monthLabel(x).split(' ')[0];
+  const gRows = titles.some(x => GORDAN_RE.test(x)) ? [0, -1, -2].map(d => { const mk = shiftMonth(k, d), gm = gordanMonth(mk, now);
+    return `<button class="sh-row" data-act="gordan-paid" data-m="${mk}"><span><b>${monthLabel(mk)}</b><small>${!gm.counted && d < 0 ? 'تعداد شاگردهای این ماه ثبت نشده است' : `${fa(gm.est)} شاگرد${gm.shifts > gm.counted ? ` (${fa(gm.shifts - gm.counted)} شیفت با میانگین)` : ''}، پیش‌بینی ${short(gm.est * G.perHead)}${gm.paid && gm.est ? `؛ واقعی هر نفر ${short(gm.paid / gm.est)}` : ''}`}</small></span><i class="pl ${gm.paid ? 'g' : 'dim'}">${gm.paid ? `دریافتی ${short(gm.paid)}` : 'دریافتی را بنویسید'}</i></button>`; }).join('') : '';
+  const others = titles.filter(x => !GORDAN_RE.test(x)).map(t => {
     const n = store.all('entry').filter(e => e.title === t && isActive(e) && monthKeyOf(e.date) === k && ['done', 'now'].includes(liveStatus(e, now))).length, r = shiftRate(t);
-    return `<button class="sh-row" data-act="shift-pay" data-t="${esc(t)}"><span><b>${esc(t)}</b><small>${fa(n)} شیفت در ${monthLabel(k).split(' ')[0]}</small></span><i class="pl ${r == null ? 'dim' : ''}">${r == null ? 'مبلغ وارد نشده' : `${short(r)} هر شیفت`}</i></button>`;
-  }).join('')}</div>` : '';
+    return `<button class="sh-row" data-act="shift-pay" data-t="${esc(t)}"><span><b>${esc(t)}</b><small>${fa(n)} شیفت در ${mName(k)}</small></span><i class="pl ${r == null ? 'dim' : ''}">${r == null ? 'مبلغ وارد نشده' : `${short(r)} هر شیفت`}</i></button>`;
+  }).join('');
+  const shiftsH = titles.length ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌ها</b>${gRows ? `<button class="pill-btn" data-act="gordan-rate">هر شاگرد ${short(G.perHead)}</button>` : ''}</div>
+    ${gRows ? `<p class="hint">گردان: پیش‌بینی = تعداد شاگردها × ${short(G.perHead)}. روی هر ماه بزنید و مبلغی را که گردان برای آن ماه پرداخت کرد بنویسید (حدود ۱۷ ماه بعد واریز می‌شود).</p>${gRows}` : ''}${others}</div>` : '';
   return `<div class="head"><div><div class="eyebrow">دوره‌ها، جلسه‌ها و پرداخت‌ها</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
     ${top}${readyH}${list.length ? `<div class="cl2-list stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}${shiftsH}`;
@@ -898,6 +903,15 @@ document.addEventListener('click', async ev => {
     e.price = toNum(v); logChange(e, { price: e.price });
     await store.put(e); await render(false); renderSheet();
     toast(e.price != null ? `مبلغ این جلسه: ${money(e.price)} تومان` : 'مبلغ از فهرست قیمت گرفته می‌شود'); return;
+  }
+  if (act === 'gordan-rate' || act === 'gordan-paid') {
+    const G = { ...gordan(), paid: { ...gordan().paid } }, mk = t.closest('[data-act]').dataset.m;
+    const v = act === 'gordan-rate' ? prompt('سهم شما از هر شاگرد در هر جلسه، به تومان', money(G.perHead))
+      : prompt(`گردان برای ${monthLabel(mk)} چقدر پرداخت کرد؟ (تومان، خالی = پاک شود)`, G.paid[mk] ? money(G.paid[mk]) : '');
+    if (v === null) return;
+    const n = toNum(v);
+    if (act === 'gordan-rate') { if (!n) return; G.perHead = n; } else if (n) G.paid[mk] = n; else delete G.paid[mk];
+    await store.put(G); await render(false); toast('ذخیره شد'); return;
   }
   if (act === 'shift-pay') {
     const title = t.closest('[data-act]').dataset.t, cur = shiftRate(title);

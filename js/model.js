@@ -238,9 +238,32 @@ export const monthKeyOf = k => { const j = toJalali(fromDayKey(k)); return `${j.
 const MONTH_KEYS = ['workMin', 'clientMin', 'shiftMin', 'estMin', 'sessions', 'shifts', 'earned', 'unpriced', 'shiftEarned',
   'fcValue', 'fcSessions', 'fcShifts', 'fcPlanned', 'fcUnpriced', 'fcShiftsUnpriced'];
 
+// Gordan pays per student: each attendee of a Gordan shift counts at an average share (180,000 by default, editable),
+// and what Gordan actually paid for each month is written down next to it (it pays around the 17th of the next month).
+export const GORDAN_RE = /گردان/;
+export const gordan = () => store.get('gordan') || { id: 'gordan', kind: 'gordanpay', perHead: 180000, paid: {} };
+const usualShiftHeads = title => {
+  const xs = store.all('entry').filter(e => e.title === title && e.headcount != null).sort(byTime).slice(-10);
+  return xs.length ? xs.reduce((s, e) => s + e.headcount, 0) / xs.length : null;
+};
+// Students of Gordan shifts in a month: counted ones, and an estimate for uncounted shifts from that shift's average.
+export function gordanMonth(k, now = new Date()) {
+  const { start, end } = monthRange(k), a = dayKey(start), b = dayKey(end);
+  const xs = store.all('entry').filter(e => e.cat === 'shift' && GORDAN_RE.test(e.title) && isActive(e) && e.date >= a && e.date < b && ['done', 'now'].includes(liveStatus(e, now)));
+  const known = xs.filter(e => e.headcount != null), heads = known.reduce((s, e) => s + e.headcount, 0);
+  let est = heads;
+  for (const e of xs) if (e.headcount == null) est += usualShiftHeads(e.title) || 0;
+  return { shifts: xs.length, counted: known.length, heads, est: Math.round(est), paid: gordan().paid[k] ?? null };
+}
+
 // What a shift pays, per shift title (optional; entered on the clients page). Missing = not counted as income.
 export const shiftPay = () => store.get('shiftpay') || { id: 'shiftpay', kind: 'shiftpay', by: {} };
 export const shiftRate = title => shiftPay().by[title] ?? null;
+// One shift's income: Gordan by its students (counted, else the usual count) × the average share; others by their pay.
+export function shiftIncome(title, heads) {
+  if (GORDAN_RE.test(title)) { const n = heads ?? usualShiftHeads(title); return n != null ? n * gordan().perHead : null; }
+  return shiftRate(title);
+}
 // The usual number of people in a group's session: the most common of its last eight, else all members.
 function usualHeadcount(gid) {
   const c = new Map();
@@ -261,7 +284,7 @@ export function monthForecast(k, now = new Date()) {
       const g = groupId && store.get(groupId), row = priceRow(g, date), hc = n ?? (groupId ? usualHeadcount(groupId) : null);
       const p = row && hc != null ? row.by[hc] : null;
       if (p == null) f.unpriced++; else f.planned += p;
-    } else if (cat === 'shift') { f.shifts++; const p = shiftRate(title); if (p == null) f.shiftsUnpriced++; else f.planned += p; }
+    } else if (cat === 'shift') { f.shifts++; const p = shiftIncome(title, n); if (p == null) f.shiftsUnpriced++; else f.planned += p; }
   };
   for (const e of store.all('entry')) {
     if (e.date < a || e.date >= b || !isActive(e) || liveStatus(e, now) !== 'planned') continue;
@@ -284,7 +307,7 @@ export function monthStats(now = new Date()) {
     const min = minutesOf(e);
     m.workMin += min; if (e.estimated) m.estMin += min;
     if (e.cat === 'client') { m.clientMin += min; m.sessions++; const p = priceOf(e); if (p == null) m.unpriced++; else m.earned += p; }
-    else { m.shiftMin += min; m.shifts++; m.shiftEarned += shiftRate(e.title) || 0; }
+    else { m.shiftMin += min; m.shifts++; m.shiftEarned += shiftIncome(e.title, e.headcount ?? null) || 0; }
   }
   // The running month also carries its forecast: held so far + planned for the rest.
   const cur = monthKeyOf(dayKey(now)), m = out[cur] || (out[cur] = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0, shiftEarned: 0 });
