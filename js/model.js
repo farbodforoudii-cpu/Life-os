@@ -1,5 +1,5 @@
 // Domain model: entries, weekly templates, client groups and their packages (series).
-import { toJalali, MONTHS, WEEKDAYS, faDigits } from './jalali.js';
+import { toJalali, MONTHS, WEEKDAYS, faDigits, monthRange } from './jalali.js';
 import { store } from './store.js';
 
 export const CATS = {
@@ -235,19 +235,61 @@ const periodOf = rows => {
 // Each app publishes a summary of its own month: this one `month_<YYYY-MM>` (hours, sessions, value of the sessions
 // held), «حساب من» `money_<YYYY-MM>` (work income received). Both apps show the same card from the two.
 export const monthKeyOf = k => { const j = toJalali(fromDayKey(k)); return `${j.jy}-${String(j.jm).padStart(2, '0')}`; };
-const MONTH_KEYS = ['workMin', 'clientMin', 'shiftMin', 'estMin', 'sessions', 'shifts', 'earned', 'unpriced'];
+const MONTH_KEYS = ['workMin', 'clientMin', 'shiftMin', 'estMin', 'sessions', 'shifts', 'earned', 'unpriced', 'shiftEarned',
+  'fcValue', 'fcSessions', 'fcShifts', 'fcPlanned', 'fcUnpriced', 'fcShiftsUnpriced'];
+
+// What a shift pays, per shift title (optional; entered on the clients page). Missing = not counted as income.
+export const shiftPay = () => store.get('shiftpay') || { id: 'shiftpay', kind: 'shiftpay', by: {} };
+export const shiftRate = title => shiftPay().by[title] ?? null;
+// The usual number of people in a group's session: the most common of its last eight, else all members.
+function usualHeadcount(gid) {
+  const c = new Map();
+  for (const e of sessionsOf(gid).filter(x => liveStatus(x) === 'done').slice(-8)) { const n = headcount(e); if (n != null) c.set(n, (c.get(n) || 0) + 1); }
+  if (c.size) return [...c].sort((a, b) => b[1] - a[1])[0][0];
+  const g = store.get(gid); return g && g.members && g.members.length ? g.members.length : null;
+}
+
+// The month ahead if the weekly pattern holds: sessions and shifts already held, plus what is planned for the rest
+// of the month — entries already on the calendar and pattern days not created yet. Each planned session is priced
+// from its group's list for the usual number of people; a shift by its pay, when entered.
+export function monthForecast(k, now = new Date()) {
+  const { start, end } = monthRange(k), a = dayKey(start), b = dayKey(end), today = dayKey(now);
+  const f = { planned: 0, sessions: 0, shifts: 0, unpriced: 0, shiftsUnpriced: 0 };
+  const add = (cat, groupId, title, date, n) => {
+    if (cat === 'client') {
+      f.sessions++;
+      const g = groupId && store.get(groupId), row = priceRow(g, date), hc = n ?? (groupId ? usualHeadcount(groupId) : null);
+      const p = row && hc != null ? row.by[hc] : null;
+      if (p == null) f.unpriced++; else f.planned += p;
+    } else if (cat === 'shift') { f.shifts++; const p = shiftRate(title); if (p == null) f.shiftsUnpriced++; else f.planned += p; }
+  };
+  for (const e of store.all('entry')) {
+    if (e.date < a || e.date >= b || !isActive(e) || liveStatus(e, now) !== 'planned') continue;
+    add(e.cat, e.groupId, e.title, e.date, e.headcount ?? null);
+  }
+  for (let d = addDays(fromDayKey(today), 1); dayKey(d) < b; d = addDays(d, 1)) {
+    const k2 = dayKey(d);
+    if (k2 < a) continue;
+    for (const tpl of store.all('template')) if (tplCovers(tpl, k2, d) && !store.raw(tplEntryId(tpl, k2))) add(tpl.cat, tpl.groupId, tpl.title, k2, tpl.cat === 'shift' ? tpl.headcount : null);
+  }
+  return f;
+}
 export function monthStats(now = new Date()) {
   const out = {};
   for (const e of store.all('entry')) {
     if (!isActive(e) || (e.cat !== 'client' && e.cat !== 'shift')) continue;
     const st = liveStatus(e, now);
     if (st !== 'done' && st !== 'now') continue;
-    const k = monthKeyOf(e.date), m = out[k] || (out[k] = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0 });
+    const k = monthKeyOf(e.date), m = out[k] || (out[k] = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0, shiftEarned: 0 });
     const min = minutesOf(e);
     m.workMin += min; if (e.estimated) m.estMin += min;
     if (e.cat === 'client') { m.clientMin += min; m.sessions++; const p = priceOf(e); if (p == null) m.unpriced++; else m.earned += p; }
-    else { m.shiftMin += min; m.shifts++; }
+    else { m.shiftMin += min; m.shifts++; m.shiftEarned += shiftRate(e.title) || 0; }
   }
+  // The running month also carries its forecast: held so far + planned for the rest.
+  const cur = monthKeyOf(dayKey(now)), m = out[cur] || (out[cur] = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0, shiftEarned: 0 });
+  const fc = monthForecast(cur, now);
+  Object.assign(m, { fcPlanned: fc.planned, fcValue: m.earned + m.shiftEarned + fc.planned, fcSessions: fc.sessions, fcShifts: fc.shifts, fcUnpriced: fc.unpriced, fcShiftsUnpriced: fc.shiftsUnpriced });
   return out;
 }
 function monthRows(now) {

@@ -1,13 +1,13 @@
 import { requestPersistence } from './db.js';
 import { store } from './store.js';
 import { sync } from './sync.js';
-import { faDigits, WEEKDAYS, MONTHS, toJalali, shiftMonth, monthLabel, monthRange } from './jalali.js';
+import { faDigits, WEEKDAYS, MONTHS, toJalali, fromJalali, shiftMonth, monthLabel, monthRange } from './jalali.js';
 import {
   CATS, CANCEL_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
+  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, shiftPay, shiftRate, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -158,26 +158,56 @@ function week() {
     ${store.all('template').length ? '' : `<div class="card empty" style="margin-top:14px"><b>هنوز الگوی هفته نداری</b>«الگوی هفته» را بزن و برنامهٔ ثابتت را یک بار وارد کن؛ از آن به بعد هر هفته خودکار پر می‌شود.</div>`}`;
 }
 
+// A small ring: how far a package has come (done of size), the count in its centre.
+function ring(done, size, px = 54) {
+  const r = 22, c = 2 * Math.PI * r, p = size ? Math.min(1, done / size) : 0, full = size && done >= size;
+  return `<svg class="ring ${full ? 'full' : ''}" viewBox="0 0 54 54" width="${px}" height="${px}" aria-hidden="true"><circle class="rg-bg" cx="27" cy="27" r="${r}"/>
+    <circle class="rg-fg" cx="27" cy="27" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - p)).toFixed(1)}" style="--c:${c.toFixed(1)}"/>
+    <text x="27" y="27">${size ? `${fa(done)}/${fa(size)}` : '—'}</text></svg>`;
+}
+// Jalali date as typed («۱۴۰۵/۷/۱۸») to a stored day, and back.
+const jDateOf = k => { const j = toJalali(fromDayKey(k)); return `${fa(j.jy)}/${fa(j.jm)}/${fa(j.jd)}`; };
+function parseJDate(v) {
+  const m = String(v || '').replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  return m ? dayKey(fromJalali(+m[1], +m[2], +m[3])) : null;
+}
+// The price a group's next session would have: today's list, for its usual number of people.
+function groupPriceNow(g) {
+  const row = priceRow(g, todayKey());
+  if (!row) return null;
+  const ns = Object.keys(row.by).map(Number), m = (g.members || []).length;
+  const n = ns.includes(m) ? m : ns.sort((a, b) => b - a)[0];
+  return { n, v: row.by[n], row };
+}
+
 function clients() {
-  const list = groups();
-  const cards = list.map(g => {
-    const st = groupStatus(g.id);
-    const size = st.current ? st.current.size : 0;
-    const warn = st.current && st.left <= 1;
-    const unpaid = st.current && !st.current.paid;
-    return `<button class="cl ${warn ? 'warn' : ''}" data-act="group" data-id="${g.id}">
-      <div class="cl-top"><b>${esc(g.name)}</b><span>${st.current ? `${fa(st.done)}/${fa(size)}` : 'بدون دوره'}</span></div>
-      ${st.current ? `<div class="prog">${Array.from({ length: size }, (_, i) => `<i class="${i < st.done ? 'f' : ''}"></i>`).join('')}</div>` : ''}
-      <div class="cl-sub"><span>${!st.current ? 'دوره تعریف نشده' : st.left <= 0 ? 'دوره تمام شد؛ وقت تمدید' : warn ? '۱ جلسه مانده؛ وقت تمدید' : `${fa(st.left)} جلسه مانده`}${unpaid ? '، <em class="unpaid">پرداخت نشده</em>' : ''}${st.outside ? `، ${fa(st.outside)} جلسه خارج از دوره` : ''}</span>
-      <span>${st.next ? `بعدی: ${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : ''}</span></div>
-      <div class="cl-sub"><span>${(g.members || []).length ? `${fa(g.members.length)} نفر: ${esc(g.members.join('، '))}` : ''}</span><span>${g.place ? esc(g.place) : ''}</span></div></button>`;
-  }).join('');
-  const waiting = awaitingPayment();
+  const list = groups(), now = new Date(), k = monthKeyOf(dayKey(now)), M = monthStats(now)[k] || {};
+  const wait = awaitingPayment(now), owed = wait.reduce((a, e) => a + (priceOf(e) || 0), 0);
+  const owedBy = new Map(); for (const e of wait) if (e.groupId) owedBy.set(e.groupId, (owedBy.get(e.groupId) || 0) + (priceOf(e) || 0));
   const ready = list.flatMap(g => seriesOf(g.id)).filter(x => !x.paid && seriesDone(x)).map(x => invoiceOf(x.id));
-  const readyH = ready.length ? `<div class="card inv-ready stagger"><div class="eyebrow">دوره تمام شد؛ فاکتور آماده است</div>${ready.map(v => `<button class="inv-row" data-act="invoice" data-id="${v.s.id}"><b>${esc(v.g.name)}</b><span>${fa(v.rows.length)} جلسه${v.total ? `، ${num(v.total)} تومان` : ''}</span><em>دیدن فاکتور</em></button>`).join('')}</div>` : '';
-  return `<div class="head"><div><div class="eyebrow">${list.length ? `${fa(list.length)} گروه فعال` : 'دوره‌ها و جلسه‌ها'}${waiting.length ? `، <span style="color:var(--burg)">${fa(waiting.length)} جلسه منتظر پرداخت</span>` : ''}</div><h1 class="big">مراجع‌ها</h1></div>
+  const top = `<div class="ct-tiles stagger">
+      <div class="ct"><span>مراجع فعال</span><b>${fa(list.length)}</b><em>${fa(list.reduce((a, g) => a + (g.members || []).length, 0))} نفر</em></div>
+      <div class="ct"><span>جلسه در ${monthLabel(k).split(' ')[0]}</span><b>${fa(M.sessions || 0)}</b><em>${M.fcSessions ? `${fa(M.fcSessions)} جلسهٔ دیگر در برنامه` : 'تا امروز'}</em></div>
+      <div class="ct ${owed ? 'warn' : ''}"><span>طلب باز</span><b>${owed ? short(owed) : '—'}</b><em>${wait.length ? `${fa(wait.length)} جلسهٔ پرداخت‌نشده` : 'همه تسویه است'}</em></div></div>`;
+  const readyH = ready.length ? `<div class="card inv-ready stagger"><div class="eyebrow">دوره تمام شد؛ فاکتور آماده است</div>${ready.map(v => `<button class="inv-row" data-act="invoice" data-id="${v.s.id}"><b>${esc(v.g.name)}</b><span>${fa(v.rows.length)} جلسه${v.total ? `، ${short(v.total)} تومان` : ''}</span><em>دیدن فاکتور</em></button>`).join('')}</div>` : '';
+  const cards = list.map(g => {
+    const st = groupStatus(g.id), cur = st.current, size = cur ? cur.size : 0, pn = groupPriceNow(g), o = owedBy.get(g.id) || 0;
+    const state = !cur ? 'دوره تعریف نشده' : st.left <= 0 ? 'دوره تمام شد؛ وقت تمدید' : st.left === 1 ? '۱ جلسه مانده؛ وقت تمدید' : `${fa(st.left)} جلسه مانده`;
+    return `<button class="cl2 ${cur && st.left <= 1 ? 'warn' : ''}" data-act="group" data-id="${g.id}">
+      ${ring(st.done, size)}
+      <span class="cl2-txt"><b>${esc(g.name)}</b><small>${state}${st.next ? `، بعدی ${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : ''}</small>
+        <span class="cl2-pills">${pn ? `<i class="pl">${short(pn.v)} هر جلسه${Object.keys(pn.row.by).length > 1 ? `، ${pn.n === 1 ? 'خصوصی' : `${fa(pn.n)} نفر`}` : ''}</i>` : '<i class="pl dim">قیمت وارد نشده</i>'}${o ? `<i class="pl r">${short(o)} پرداخت نشده</i>` : cur && cur.paid ? '<i class="pl g">پرداخت شده</i>' : ''}</span></span>
+      <span class="cl2-go" aria-hidden="true">‹</span></button>`;
+  }).join('');
+  // Shifts: how many this month, and what one pays (optional; used in the month's forecast).
+  const titles = [...new Set(store.all('template').filter(t => t.cat === 'shift' && !t.until).map(t => t.title))];
+  const shiftsH = titles.length ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌ها</b><span class="eyebrow">مبلغ هر شیفت برای پیش‌بینی درآمد ماه</span></div>${titles.map(t => {
+    const n = store.all('entry').filter(e => e.title === t && isActive(e) && monthKeyOf(e.date) === k && ['done', 'now'].includes(liveStatus(e, now))).length, r = shiftRate(t);
+    return `<button class="sh-row" data-act="shift-pay" data-t="${esc(t)}"><span><b>${esc(t)}</b><small>${fa(n)} شیفت در ${monthLabel(k).split(' ')[0]}</small></span><i class="pl ${r == null ? 'dim' : ''}">${r == null ? 'مبلغ وارد نشده' : `${short(r)} هر شیفت`}</i></button>`;
+  }).join('')}</div>` : '';
+  return `<div class="head"><div><div class="eyebrow">دوره‌ها، جلسه‌ها و پرداخت‌ها</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
-    ${readyH}${list.length ? `<div class="cl-grid stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}`;
+    ${top}${readyH}${list.length ? `<div class="cl2-list stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}${shiftsH}`;
 }
 
 // ---------- report ----------
@@ -275,7 +305,9 @@ function report() {
   const moneyBars = bars(s => s.earned, maxE, v => fa(Math.round(v / 1e6)), (x, max) => `<i class="m" style="height:${(x.s.earned / max * 100).toFixed(1)}%"></i>`);
   const best = list.reduce((a, x) => x.s.workMin > (a?.s.workMin || 0) ? x : a, null);
   const readH = !full.length ? '' : `میانگین ${fa(full.length)} ${unit} کامل اخیر: ${hrs(avgH * 60)} ساعت. ${best ? `بیشترین: ${best.p.name} با ${hrs(best.s.workMin)} ساعت. ` : ''}${paceH != null ? `اگر به همین روال ادامه دهی، ${P.name} حدود ${hrs(paceH * 60)} ساعت می‌شود (= ${hrs(S.workMin)} ساعت تا امروز ÷ ${fa(elapsed)} روز × ${fa(P.days)} روز).` : ''}`;
-  const readE = !full.length ? '' : `میانگین ${unit}‌های کامل: ${short(avgE)} تومان.${paceE != null ? ` با همین روال، ${P.name} حدود ${short(paceE)} تومان می‌شود (همان حساب بالا).` : ''} درآمد هر ساعت جلسه: ${S.clientMin ? `${short(S.earned / (S.clientMin / 60))} تومان (= درآمد جلسه‌ها ÷ ${hrs(S.clientMin)} ساعت جلسه)` : '—'}.`;
+  const FC = running && mode === 'month' ? monthStats(now)[P.key] : null;
+  const fcLine = FC && FC.fcValue ? `پیش‌بینی ${P.name} از روی برنامهٔ ثابت: ${short(FC.fcValue)} تومان (= تا امروز ${short(FC.fcValue - FC.fcPlanned)} + ${fa(FC.fcSessions)} جلسه${FC.fcShifts ? ` و ${fa(FC.fcShifts)} شیفت` : ''} باقی‌مانده ${short(FC.fcPlanned)})${FC.fcUnpriced || FC.fcShiftsUnpriced ? `؛ ${FC.fcUnpriced ? `${fa(FC.fcUnpriced)} جلسه` : ''}${FC.fcUnpriced && FC.fcShiftsUnpriced ? ' و ' : ''}${FC.fcShiftsUnpriced ? `${fa(FC.fcShiftsUnpriced)} شیفت` : ''} بدون مبلغ حساب نشده` : ''}.` : '';
+  const readE = !full.length ? fcLine : `میانگین ${unit}‌های کامل: ${short(avgE)} تومان. ${fcLine || (paceE != null ? `با همین روال، ${P.name} حدود ${short(paceE)} تومان می‌شود.` : '')} درآمد هر ساعت جلسه: ${S.clientMin ? `${short(S.earned / (S.clientMin / 60))} تومان (= درآمد جلسه‌ها ÷ ${hrs(S.clientMin)} ساعت جلسه)` : '—'}.`;
   const trend = `<div class="card rcard"><h3>ساعت کار، ${unit} به ${unit} <small>(عدد بالای ستون: ساعت)</small></h3>${hoursBars}
       <div class="rleg"><span><i style="background:var(--c-client)"></i>جلسهٔ مراجع</span><span><i style="background:var(--c-shift)"></i>شیفت</span></div><p class="rread">${readH}</p></div>
     <div class="card rcard"><h3>درآمد جلسه‌ها، ${unit} به ${unit} <small>(عدد بالای ستون: میلیون تومان)</small></h3>${moneyBars}<p class="rread">${readE}</p></div>`;
@@ -493,22 +525,28 @@ const SHEETS = {
   group(s) {
     const g = store.get(s.id);
     if (!g) return sheetHead('پیدا نشد');
-    const st = groupStatus(g.id);
+    const st = groupStatus(g.id), cur = st.current, nums = numberSessions(g.id);
     const series = seriesOf(g.id).reverse();
-    const nums = numberSessions(g.id);
-    const hist = store.all('entry').filter(e => e.groupId === g.id && e.date <= todayKey()).sort(byTime).reverse().slice(0, 12);
-    return sheetHead(esc(g.name), '<button class="pill-btn" data-act="group-edit">ویرایش</button>') + `
-      <div class="eyebrow">${(g.members || []).length ? `${fa(g.members.length)} نفر: ${esc(g.members.join('، '))}` : ''}${g.place ? `، ${esc(g.place)}` : ''}</div>
-      <div class="cards-row"><div class="mini"><span>دورهٔ فعلی</span><b>${st.current ? `${fa(st.done)} از ${fa(st.current.size)}` : '—'}</b></div>
-        <div class="mini"><span>جلسهٔ بعد</span><b>${st.next ? `${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : '—'}</b></div>
-        <div class="mini"><span>کل جلسه‌ها</span><b>${fa(st.total)}</b></div></div>
-      <div class="sh-sub"><b>قیمت هر جلسه</b><button class="pill-btn" data-act="prices" data-id="${g.id}">ویرایش</button></div>
-      ${priceList(g)}
+    const hist = store.all('entry').filter(e => e.groupId === g.id && e.date <= todayKey()).sort(byTime).reverse().slice(0, 10);
+    const vc = cur ? invoiceOf(cur.id) : null, doneVal = vc ? vc.rows.filter(r => r.done).reduce((a, r) => a + (r.price || 0), 0) : 0;
+    const row = priceRow(g, todayKey());
+    const period = v => { const ms = [...new Set(v.rows.map(r => monthLabel(monthKeyOf(r.e.date)).split(' ')[0]))]; return ms.length ? (ms.length > 1 ? `${ms[0]}–${ms[ms.length - 1]}` : ms[0]) : jDayMonth(fromDayKey(v.s.start)); };
+    return sheetHead(esc(g.name), `<button class="pill-btn" data-act="group-edit">ویرایش</button>`) + `
+      <div class="chips">${(g.members || []).map(m => `<span class="chip small static">${esc(m)}</span>`).join('')}${g.place ? `<span class="chip small static soft">${esc(g.place)}</span>` : ''}</div>
+      ${cur ? `<div class="gp-hero"><div class="gp-ring">${ring(st.done, cur.size, 92)}</div><div class="gp-txt">
+          <span class="eyebrow">دورهٔ فعلی، از ${jFull(cur.start)}</span>
+          <b>${st.left <= 0 ? 'دوره تمام شد' : `${fa(st.left)} جلسه مانده`}</b>
+          <small>${st.next ? `جلسهٔ بعد: ${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : 'جلسهٔ بعدی در برنامه نیست'}</small>
+          <small>تا امروز ${short(doneVal)} تومان${vc && vc.total > doneVal ? `، کل دوره حدود ${short(vc.total)}` : ''}</small>
+          <span class="gp-acts"><button class="chip small ${cur.paid ? 'sel' : 'warn-chip'}" data-paid="${cur.id}">${cur.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button><button class="chip small" data-act="invoice" data-id="${cur.id}">فاکتور</button><button class="chip small" data-act="series-edit" data-id="${cur.id}">ویرایش دوره</button></span></div></div>` : '<button class="wide-btn" data-act="series-new">شروع نخستین دوره</button>'}
+      <div class="sh-sub"><b>قیمت هر جلسه</b><button class="pill-btn" data-act="prices" data-id="${g.id}">تغییر قیمت</button></div>
+      ${row ? `<div class="gp-prices">${Object.entries(row.by).map(([n, v]) => `<div><span>${n === '1' ? 'خصوصی' : `${fa(n)} نفر`}</span><b>${short(v)}</b></div>`).join('')}</div><p class="hint">از ${jFull(row.from)}، به تومان. مبلغ هر جلسه با تعداد حاضران همان جلسه حساب می‌شود.</p>` : `<button class="wide-btn ghost" data-act="prices" data-id="${g.id}">قیمت وارد نشده؛ بزن تا وارد کنی</button>`}
       <div class="sh-sub"><b>دوره‌ها</b><button class="pill-btn" data-act="series-new">+ دورهٔ جدید</button></div>
-      ${series.length ? series.map(x => `<div class="sr-row"><button class="sr-edit" data-act="series-edit" data-id="${x.id}">${fa(x.size)} جلسه، از ${jDayMonth(fromDayKey(x.start))}<span class="soft">ویرایش</span></button>
-        <span class="sr-acts"><button class="chip small" data-act="invoice" data-id="${x.id}">فاکتور</button><button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></span></div>`).join('') : '<p class="hint">هنوز دوره‌ای نیست. «دورهٔ جدید» را بزن.</p>'}
-      <div class="sh-sub"><b>سابقه</b></div>
-      ${hist.length ? hist.map(e => { const n = nums.get(e.id); return `<button class="hs-row ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><b>${isActive(e) ? (n ? fa(n.n) : '–') : '✕'}</b><span>${weekdayName(fromDayKey(e.date))} ${jDayMonth(fromDayKey(e.date))}</span><em>${isActive(e) ? `${fa(headcount(e) ?? '')} نفر` : (e.reason || 'لغو')}</em></button>`; }).join('') : '<p class="hint">هنوز جلسه‌ای ثبت نشده.</p>'}`;
+      <div class="gp-list">${series.length ? series.map(x => { const v = invoiceOf(x.id); return `<div class="gp-sr">
+        <button class="gp-sr-main" data-act="series-edit" data-id="${x.id}"><b>${period(v)}</b><small>${fa(v.rows.length)} از ${fa(x.size)} جلسه${v.total ? `، ${short(v.total)} تومان` : ''}</small></button>
+        <button class="chip small" data-act="invoice" data-id="${x.id}">فاکتور</button><button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></div>`; }).join('') : '<p class="hint">هنوز دوره‌ای نیست.</p>'}</div>
+      <div class="sh-sub"><b>جلسه‌های اخیر</b></div>
+      <div class="gp-list">${hist.length ? hist.map(e => { const n = nums.get(e.id), p = priceOf(e); return `<button class="gp-hs ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><b>${isActive(e) ? (n ? fa(n.n) : '–') : '✕'}</b><span>${jFull(e.date)}<small>${isActive(e) ? sessionKind(e) : (e.reason || 'لغو')}</small></span><em>${isActive(e) && p != null ? short(p) : ''}</em></button>`; }).join('') : '<p class="hint">هنوز جلسه‌ای ثبت نشده.</p>'}</div>`;
   },
 
   groupEdit(s) {
@@ -532,7 +570,7 @@ const SHEETS = {
     if (s.id) {
       const x = store.get(s.id);
       return sheetHead('ویرایش دوره') + `
-      <p class="hint">شروع: ${weekdayName(fromDayKey(x.start))} ${jDayMonth(fromDayKey(x.start))}</p>
+      <label class="fld">تاریخ شروع (شمسی، مثلاً ۱۴۰۵/۷/۱۸)<input id="fSStart" type="text" inputmode="numeric" autocomplete="off" value="${jDateOf(x.start)}"></label>
       <label class="fld">تعداد جلسه‌ها<input id="fSize" type="text" inputmode="numeric" autocomplete="off" value="${fa(x.size)}"></label>
       <label class="fld">جلسه‌هایی که پیش از ثبت در اپ برگزار شد<input id="fOffset" type="text" inputmode="numeric" autocomplete="off" value="${fa(x.offset || 0)}"></label>
       <label class="chk"><input type="checkbox" id="fPaid" ${x.paid ? 'checked' : ''}> پرداخت شده</label>
@@ -558,10 +596,16 @@ const SHEETS = {
       return `<label class="fld">${n === 1 ? 'یک نفر (خصوصی)' : `${fa(n)} نفر`}<input id="fP${n}" type="text" inputmode="numeric" autocomplete="off" value="${v != null ? money(v) : ''}" placeholder="تومان"></label>
         ${sug ? `<button class="chip small sug" data-sugp="${n}" data-v="${sug}">پیشنهاد ${num(sug)} = ${num(ref[1])} ÷ ${fa(ref[0])} × ${fa(n)}</button>` : ''}`;
     }).join('');
-    const cur = groupStatus(g.id).current;
+    const ss = seriesOf(g.id), cur = groupStatus(g.id).current, prev = cur ? ss[ss.indexOf(cur) - 1] : null;
+    const from = s.from || (row ? todayKey() : (cur?.start || todayKey()));
+    const opt = (k, l) => `<button class="chip small ${from === k ? 'sel' : ''}" data-pfrom="${k}">${l}</button>`;
     return sheetHead(`قیمت هر جلسه، ${esc(g.name)}`) + `
-      <p class="hint">مبلغ یک جلسه بر اساس تعداد حاضران همان جلسه. ${row ? `قیمت تازه از امروز حساب می‌شود و جلسه‌های گذشته با قیمت خودشان می‌مانند.` : `نخستین قیمت از شروع دورهٔ فعلی${cur ? ` (${jFull(cur.start)})` : ''} حساب می‌شود.`}</p>
+      <p class="hint">مبلغ یک جلسه بر اساس تعداد حاضران همان جلسه.</p>
       ${fields}
+      <div class="eyebrow">از چه تاریخی؟</div>
+      <div class="chips">${opt(todayKey(), 'از امروز')}${cur ? opt(cur.start, `از شروع دورهٔ فعلی، ${jDayMonth(fromDayKey(cur.start))}`) : ''}${prev ? opt(prev.start, `از دورهٔ قبل، ${jDayMonth(fromDayKey(prev.start))}`) : ''}</div>
+      <label class="fld">یا تاریخ دلخواه (شمسی)<input id="fPFrom" type="text" inputmode="numeric" autocomplete="off" value="${jDateOf(from)}"></label>
+      <p class="hint">جلسه‌های پرداخت‌نشده از این تاریخ به بعد با قیمت تازه حساب می‌شوند. دوره‌های پرداخت‌شده دست نمی‌خورند.</p>
       <button class="wide-btn" data-act="save-prices" data-id="${g.id}">ذخیره</button>
       ${(g.prices || []).length > 1 ? `<details class="more"><summary>قیمت‌های قبلی</summary>${[...g.prices].reverse().map(r => `<p class="hint">از ${jFull(r.from)}: ${Object.entries(r.by).map(([n, v]) => `${n === '1' ? 'خصوصی' : `${fa(n)} نفر`} ${num(v)}`).join('، ')}</p>`).join('')}</details>` : ''}`;
   },
@@ -845,6 +889,14 @@ document.addEventListener('click', async ev => {
     return;
   }
   if (act === 'prices') { openSheet('prices', { id: t.closest('[data-act]').dataset.id, back: s ? { ...s } : null }); return; }
+  if (act === 'shift-pay') {
+    const title = t.closest('[data-act]').dataset.t, cur = shiftRate(title);
+    const v = prompt(`مبلغ هر شیفت «${title}» به تومان (خالی = حساب نشود)`, cur != null ? money(cur) : '');
+    if (v === null) return;
+    const sp = shiftPay(); sp.by = { ...sp.by }; const n = toNum(v);
+    if (n) sp.by[title] = n; else delete sp.by[title];
+    await store.put(sp); await render(false); toast(n ? `${title}: ${money(n)} تومان هر شیفت` : 'مبلغ برداشته شد'); return;
+  }
   if (act === 'invoice') { openSheet('invoice', { id: t.closest('[data-act]').dataset.id }); return; }
   if (act === 'profile') { openSheet('profile', { back: s ? { ...s } : null }); return; }
   if (act === 'inv-image') { const v = invoiceOf(t.closest('[data-act]').dataset.id); await shareFile(await invoiceImage(v), `${v.g.invoiceLang === 'en' ? 'Invoice' : 'فاکتور'} ${v.g.invoiceLang === 'en' ? (v.g.invoiceName || v.g.name) : v.g.name}.png`); return; }
@@ -853,16 +905,19 @@ document.addEventListener('click', async ev => {
   if (!s) return;
 
   if (s.kind === 'prices') {
+    const pf = t.closest('[data-pfrom]'); if (pf) { $('#fPFrom').value = jDateOf(pf.dataset.pfrom); pf.parentNode.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c === pf)); return; }
     const sg = t.closest('[data-sugp]'); if (sg) { $(`#fP${sg.dataset.sugp}`).value = money(+sg.dataset.v); sg.remove(); return; }
     if (act === 'save-prices') {
       const g = store.get(s.id), by = {};
       for (let n = 1; $(`#fP${n}`); n++) { const v = toNum($(`#fP${n}`).value); if (v) by[n] = v; }
-      const today = todayKey(), list = [...(g.prices || [])];
-      const from = list.length ? today : (groupStatus(g.id).current?.start || today);
-      const last = list[list.length - 1];
-      if (last && last.from >= from) last.by = by; else list.push({ from, by });
-      g.prices = list; await store.put(g); await render(false);
-      toast('قیمت‌ها ذخیره شد');
+      const from = parseJDate($('#fPFrom').value);
+      if (!from) { toast('تاریخ را مثل ۱۴۰۵/۷/۱۸ بنویسید'); return; }
+      // The new row replaces every row from that day on; unpaid sessions from then on drop their old billed price.
+      g.prices = [...(g.prices || []).filter(r => r.from < from), { from, by }];
+      const redo = store.all('entry').filter(e => e.groupId === g.id && e.date >= from && e.price != null && !isPaid(e));
+      for (const e of redo) { e.price = null; logChange(e, { price: 'list' }); }
+      await store.put(g, ...redo); await render(false);
+      toast(`قیمت از ${jDayMonth(fromDayKey(from))} اعمال شد${redo.length ? `؛ ${fa(redo.length)} جلسه به‌روز شد` : ''}`);
       if (s.back) openSheet(s.back.kind, s.back); else closeSheet();
       return;
     }
@@ -1006,7 +1061,9 @@ document.addEventListener('click', async ev => {
       const size = Math.max(1, toNum($('#fSize').value, 8));
       if (s.id) {
         const x = store.get(s.id);
-        Object.assign(x, { size, paid: $('#fPaid').checked, offset: Math.min(size, Math.max(0, toNum($('#fOffset').value, 0))) });
+        const start = parseJDate($('#fSStart').value);
+        if (!start) { toast('تاریخ را مثل ۱۴۰۵/۷/۱۸ بنویسید'); return; }
+        Object.assign(x, { size, start, paid: $('#fPaid').checked, offset: Math.min(size, Math.max(0, toNum($('#fOffset').value, 0))) });
         await store.put(x);
       } else await store.put({ id: uid(), kind: 'series', groupId: s.groupId, size, start: dayKey(addDays(new Date(), s.dayOff)), paid: $('#fPaid').checked });
       openSheet('group', { id: s.groupId }); await render(false); return;
