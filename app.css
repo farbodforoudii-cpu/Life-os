@@ -505,7 +505,7 @@ input{font-family:inherit}
 .ct-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}
 .ct{background:var(--card);border-radius:18px;padding:12px 14px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:2px;direction:rtl;min-width:0}
 .ct span{font-size:12px;font-weight:700;color:var(--muted)}
-.ct b{font-size:22px;font-weight:800;line-height:1.3;white-space:nowrap}
+.ct b{font-size:clamp(15px,4.6vw,22px);font-weight:800;line-height:1.3}
 .ct em{font-style:normal;font-size:11.5px;color:var(--muted);line-height:1.5}
 .ct.warn b{color:var(--burg)}
 .cl2-list{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-bottom:14px}
