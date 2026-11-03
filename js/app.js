@@ -209,7 +209,7 @@ function clients() {
     return `<button class="sh-row" data-act="shift-pay" data-t="${esc(t)}"><span><b>${esc(t)}</b><small>${fa(n)} شیفت در ${mName(k)}</small></span><i class="pl ${r == null ? 'dim' : ''}">${r == null ? 'مبلغ وارد نشده' : `${short(r)} هر شیفت`}</i></button>`;
   }).join('');
   const shiftsH = titles.length ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌ها</b>${gRows ? `<button class="pill-btn" data-act="gordan-rate">هر شاگرد ${short(G.perHead)}</button>` : ''}</div>
-    ${gRows ? `<p class="hint">گردان: پیش‌بینی = تعداد شاگردها × ${short(G.perHead)}. روی هر ماه بزنید و مبلغی را که گردان برای آن ماه پرداخت کرد بنویسید (حدود ۱۷ ماه بعد واریز می‌شود).</p>${gRows}` : ''}${others}</div>` : '';
+    ${gRows ? `<p class="hint">گردان: پیش‌بینی = تعداد شاگردها × ${short(G.perHead)}. روی هر ماه بزنید و حقوقی را که گردان در آن ماه واریز کرد بنویسید (حدود ۱۷ و ۱۸ هر ماه).</p>${gRows}` : ''}${others}</div>` : '';
   return `<div class="head"><div><div class="eyebrow">دوره‌ها، جلسه‌ها و پرداخت‌ها</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
     ${top}${readyH}${list.length ? `<div class="cl2-list stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}${shiftsH}`;
@@ -907,7 +907,7 @@ document.addEventListener('click', async ev => {
   if (act === 'gordan-rate' || act === 'gordan-paid') {
     const G = { ...gordan(), paid: { ...gordan().paid } }, mk = t.closest('[data-act]').dataset.m;
     const v = act === 'gordan-rate' ? prompt('سهم شما از هر شاگرد در هر جلسه، به تومان', money(G.perHead))
-      : prompt(`گردان برای ${monthLabel(mk)} چقدر پرداخت کرد؟ (تومان، خالی = پاک شود)`, G.paid[mk] ? money(G.paid[mk]) : '');
+      : prompt(`گردان در ${monthLabel(mk)} چقدر واریز کرد؟ (تومان، خالی = پاک شود)`, G.paid[mk] ? money(G.paid[mk]) : '');
     if (v === null) return;
     const n = toNum(v);
     if (act === 'gordan-rate') { if (!n) return; G.perHead = n; } else if (n) G.paid[mk] = n; else delete G.paid[mk];
