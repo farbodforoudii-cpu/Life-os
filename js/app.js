@@ -7,7 +7,7 @@ import {
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, shiftPay, shiftRate, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
+  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, shiftPay, shiftRate, GORDAN_RE, gordanPlan, gordanRates, gordanMonth, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -158,6 +158,29 @@ function week() {
     ${store.all('template').length ? '' : `<div class="card empty" style="margin-top:14px"><b>هنوز الگوی هفته نداری</b>«الگوی هفته» را بزن و برنامهٔ ثابتت را یک بار وارد کن؛ از آن به بعد هر هفته خودکار پر می‌شود.</div>`}`;
 }
 
+// Gordan: this month's attendees and the pay they should bring; last month's real salary per attendee against it.
+function gordanCard(k, now) {
+  if (!store.all('template').some(t => t.cat === 'shift' && GORDAN_RE.test(t.title))) return '';
+  const R = gordanRates(), P = gordanPlan(), pct = `${fa(Math.round(P.share * 100))}٪`;
+  const cur = gordanMonth(k, now), pk = shiftMonth(k, -1), prev = gordanMonth(pk, now);
+  const mName = x => monthLabel(x).split(' ')[0];
+  const exp = g => R && g.est ? `${short(R.lo * g.est)} تا ${short(R.hi * g.est)}` : '—';
+  let verdict = '';
+  if (prev.actual && R) {
+    const v = prev.actual, implied = v / (R.mid / P.share);
+    verdict = v < R.lo * 0.97 ? `<em class="unpaid">کمتر از کمترین مقدار بازه (${short(R.lo)})؛ یعنی سهم واقعی حدود ${fa(Math.round(implied * 100))}٪ است، نه ${pct}.</em>`
+      : v > R.hi * 1.03 ? `<em>بیشتر از بیشترین مقدار بازه؛ احتمالاً شاگرد تک‌جلسه زیاد بوده یا تعدادی از شیفت‌ها ثبت نشده است.</em>` : `<em class="ok">داخل بازه است؛ با ${pct} جور درمی‌آید.</em>`;
+  }
+  return `<div class="card sh-card gd"><div class="sh-card-h"><b>گردان</b><button class="pill-btn" data-act="gordan">پکیج‌ها و درصد</button></div>
+    <p class="hint">سهم شما از هر شاگرد در هر جلسه = ${pct} × قیمت پکیج ÷ تعداد جلسه‌های پکیج${R ? `؛ یعنی ${short(R.lo)} تا ${short(R.hi)} برای پکیج‌های چندجلسه‌ای${R.single ? ` و ${short(R.single)} برای تک‌جلسه` : ''}` : '. قیمت پکیج‌ها هنوز وارد نشده است'}.</p>
+    <div class="gd-rows">
+      <div><span>${mName(k)} تا امروز</span><b>${fa(Math.round(cur.est))} نفر‌جلسه</b><small>${fa(cur.shifts)} شیفت${cur.shifts > cur.counted ? `؛ ${fa(cur.shifts - cur.counted)} شیفت بدون تعداد${cur.avg != null ? ` (با میانگین ${fa(Math.round(cur.avg))} نفر)` : ''}` : ''}</small></div>
+      <div><span>حقوق مورد انتظار ${mName(k)}</span><b>${exp(cur)}</b><small>= نفر‌جلسه × سهم هر نفر؛ حدود ۱۷ ${mName(shiftMonth(k, 1))} واریز می‌شود</small></div>
+      <div class="${prev.actual ? '' : 'dim'}"><span>${mName(pk)}: حقوق واقعی</span><b>${prev.pay ? short(prev.pay) : '—'}</b><small>${prev.actual ? `÷ ${fa(Math.round(prev.est))} نفر‌جلسه = ${short(prev.actual)} برای هر نفر` : prev.pay ? 'تعداد شاگردهای این ماه ثبت نشده است' : `از «حساب من»، وقتی حقوق ${mName(pk)} ثبت شود`}</small>${verdict}</div>
+    </div>
+    ${cur.counted ? '' : '<p class="hint">تعداد شاگردهای شیفت‌های این ماه هنوز ثبت نشده است. بعد از هر شیفت، در «امروز» زیر همان شیفت با یک لمس ثبت می‌شود.</p>'}</div>`;
+}
+
 // A small ring: how far a package has come (done of size), the count in its centre.
 function ring(done, size, px = 54) {
   const r = 22, c = 2 * Math.PI * r, p = size ? Math.min(1, done / size) : 0, full = size && done >= size;
@@ -199,12 +222,12 @@ function clients() {
         <span class="cl2-pills">${pn ? `<i class="pl">${short(pn.v)} هر جلسه${Object.keys(pn.row.by).length > 1 ? `، ${pn.n === 1 ? 'خصوصی' : `${fa(pn.n)} نفر`}` : ''}</i>` : '<i class="pl dim">قیمت وارد نشده</i>'}${o ? `<i class="pl r">${short(o)} پرداخت نشده</i>` : cur && cur.paid ? '<i class="pl g">پرداخت شده</i>' : ''}</span></span>
       <span class="cl2-go" aria-hidden="true">‹</span></button>`;
   }).join('');
-  // Shifts: how many this month, and what one pays (optional; used in the month's forecast).
-  const titles = [...new Set(store.all('template').filter(t => t.cat === 'shift' && !t.until).map(t => t.title))];
-  const shiftsH = titles.length ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌ها</b><span class="eyebrow">مبلغ هر شیفت برای پیش‌بینی درآمد ماه</span></div>${titles.map(t => {
+  // Shifts: Gordan paid per attendee (its own card); any other shift by a fixed pay per shift.
+  const titles = [...new Set(store.all('template').filter(t => t.cat === 'shift' && !t.until).map(t => t.title))].filter(x => !GORDAN_RE.test(x));
+  const shiftsH = gordanCard(k, now) + (titles.length ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌های دیگر</b><span class="eyebrow">مبلغ هر شیفت برای پیش‌بینی درآمد ماه</span></div>${titles.map(t => {
     const n = store.all('entry').filter(e => e.title === t && isActive(e) && monthKeyOf(e.date) === k && ['done', 'now'].includes(liveStatus(e, now))).length, r = shiftRate(t);
     return `<button class="sh-row" data-act="shift-pay" data-t="${esc(t)}"><span><b>${esc(t)}</b><small>${fa(n)} شیفت در ${monthLabel(k).split(' ')[0]}</small></span><i class="pl ${r == null ? 'dim' : ''}">${r == null ? 'مبلغ وارد نشده' : `${short(r)} هر شیفت`}</i></button>`;
-  }).join('')}</div>` : '';
+  }).join('')}</div>` : '');
   return `<div class="head"><div><div class="eyebrow">دوره‌ها، جلسه‌ها و پرداخت‌ها</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
     ${top}${readyH}${list.length ? `<div class="cl2-list stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}${shiftsH}`;
@@ -627,6 +650,19 @@ const SHEETS = {
       <div class="chips"><button class="chip small" data-act="group-edit" data-id="${v.g.id}">اطلاعات تماس مراجع</button><button class="chip small" data-act="profile">اطلاعات پرداخت شما</button></div>`;
   },
 
+  gordan(s) {
+    const P = gordanPlan(), row = [...(P.rows || [])].sort((a, b) => a.from.localeCompare(b.from)).pop();
+    const list = s.draft || (s.draft = row ? row.packages.map(x => ({ ...x })) : [{ name: 'تک‌جلسه', sessions: 1, price: null }]);
+    return sheetHead('گردان: پکیج‌ها و درصد') + `
+      <label class="fld">درصد شما از هر شاگرد<input id="gShare" type="text" inputmode="numeric" value="${fa(Math.round(P.share * 100))}"></label>
+      <div class="eyebrow">پکیج‌ها (هر دو شعبه)</div>
+      ${list.map((x, i) => `<div class="gd-pk"><input data-gi="${i}" data-gf="name" value="${esc(x.name || '')}" placeholder="نام"><input data-gi="${i}" data-gf="sessions" inputmode="numeric" value="${x.sessions ? fa(x.sessions) : ''}" placeholder="جلسه"><input data-gi="${i}" data-gf="price" inputmode="numeric" value="${x.price ? money(x.price) : ''}" placeholder="قیمت (تومان)"></div>`).join('')}
+      <button class="chip small" data-act="gd-add">+ پکیج</button>
+      <label class="fld">این قیمت‌ها از چه تاریخی؟ (شمسی)<input id="gFrom" type="text" inputmode="numeric" value="${jDateOf(row && !s.fresh ? row.from : todayKey())}"></label>
+      <p class="hint">وقتی گردان قیمت‌ها را بالا برد، قیمت‌های تازه را با تاریخ همان روز ذخیره کنید؛ ماه‌های قبل با قیمت‌های قبلی خود حساب می‌شوند.</p>
+      <button class="wide-btn" data-act="gd-save">ذخیره</button>`;
+  },
+
   profile() {
     const pr = profile();
     return sheetHead('اطلاعات پرداخت روی فاکتور') + `
@@ -898,6 +934,19 @@ document.addEventListener('click', async ev => {
     e.price = toNum(v); logChange(e, { price: e.price });
     await store.put(e); await render(false); renderSheet();
     toast(e.price != null ? `مبلغ این جلسه: ${money(e.price)} تومان` : 'مبلغ از فهرست قیمت گرفته می‌شود'); return;
+  }
+  if (act === 'gordan') { openSheet('gordan', {}); return; }
+  if (s && s.kind === 'gordan') {
+    const keep = () => document.querySelectorAll('[data-gi]').forEach(el => { const x = s.draft[+el.dataset.gi]; x[el.dataset.gf] = el.dataset.gf === 'name' ? el.value.trim() : toNum(el.value); });
+    if (act === 'gd-add') { keep(); s.draft.push({ name: '', sessions: null, price: null }); renderSheet(); return; }
+    if (act === 'gd-save') {
+      keep();
+      const from = parseJDate($('#gFrom').value), share = toNum($('#gShare').value);
+      if (!from || !share) { toast('درصد و تاریخ را بنویسید'); return; }
+      const packages = s.draft.filter(x => x.sessions && x.price);
+      const P = gordanPlan(); P.share = share / 100; P.rows = [...(P.rows || []).filter(r => r.from < from), { from, packages }];
+      await store.put(P); closeSheet(); await render(false); toast(`${fa(packages.length)} پکیج از ${jDayMonth(fromDayKey(from))} ذخیره شد`); return;
+    }
   }
   if (act === 'shift-pay') {
     const title = t.closest('[data-act]').dataset.t, cur = shiftRate(title);
