@@ -202,8 +202,11 @@ function clients() {
   // Shifts: Gordan by students × average share, with what Gordan really paid per month; others by a pay per shift.
   const titles = [...new Set(store.all('template').filter(t => t.cat === 'shift' && !t.until).map(t => t.title))];
   const G = gordan(), mName = x => monthLabel(x).split(' ')[0];
-  const gRows = titles.some(x => GORDAN_RE.test(x)) ? [0, -1, -2].map(d => { const mk = shiftMonth(k, d), gm = gordanMonth(mk, now);
-    return `<button class="sh-row" data-act="gordan-paid" data-m="${mk}"><span><b>${monthLabel(mk)}</b><small>${!gm.counted && d < 0 ? 'تعداد شاگردهای این ماه ثبت نشده است' : `${fa(gm.est)} شاگرد${gm.shifts > gm.counted ? ` (${fa(gm.shifts - gm.counted)} شیفت با میانگین)` : ''}، پیش‌بینی ${short(gm.est * G.perHead)}${gm.paid && gm.est ? `؛ واقعی هر نفر ${short(gm.paid / gm.est)}` : ''}`}</small></span><i class="pl ${gm.paid ? 'g' : 'dim'}">${gm.paid ? `دریافتی ${short(gm.paid)}` : 'دریافتی را بنویسید'}</i></button>`; }).join('') : '';
+  // Every month Gordan has figures for (students or pay), newest first, back to the first one; at least the last three.
+  const gKeys = Object.keys({ ...(G.heads || {}), ...(G.paid || {}) }).sort();
+  const gBack = gKeys.length ? Math.max(2, [...Array(24).keys()].find(i => shiftMonth(k, -i) <= gKeys[0]) ?? 2) : 2;
+  const gRows = titles.some(x => GORDAN_RE.test(x)) ? [...Array(gBack + 1).keys()].map(i => -i).map(d => { const mk = shiftMonth(k, d), gm = gordanMonth(mk, now);
+    return `<button class="sh-row" data-act="gordan-paid" data-m="${mk}"><span><b>${monthLabel(mk)}${d === 0 ? ' <span class="soft">تا امروز</span>' : ''}</b><small>${!gm.counted && d < 0 ? 'تعداد شاگردهای این ماه ثبت نشده است' : `${fa(gm.est)} شاگرد${gm.shifts > gm.counted && !gm.total ? ` (${fa(gm.shifts - gm.counted)} شیفت با میانگین)` : ''}${gm.paid && gm.est ? `، حقوق ${short(gm.paid)} ÷ ${fa(gm.est)} = ${short(gm.paid / gm.est)} هر نفر` : `، پیش‌بینی ${short(gm.est * G.perHead)}`}`}</small></span><i class="pl ${gm.paid ? 'g' : 'dim'}">${gm.paid ? `حقوق ${short(gm.paid)}` : d === 0 ? `واریز حدود ۱۷ ${mName(shiftMonth(mk, 1))}` : d === -1 ? `واریز حدود ۱۷ ${mName(k)}` : 'حقوق را بنویسید'}</i></button>`; }).join('') : '';
   const others = titles.filter(x => !GORDAN_RE.test(x)).map(t => {
     const n = store.all('entry').filter(e => e.title === t && isActive(e) && monthKeyOf(e.date) === k && ['done', 'now'].includes(liveStatus(e, now))).length, r = shiftRate(t);
     return `<button class="sh-row" data-act="shift-pay" data-t="${esc(t)}"><span><b>${esc(t)}</b><small>${fa(n)} شیفت در ${mName(k)}</small></span><i class="pl ${r == null ? 'dim' : ''}">${r == null ? 'مبلغ وارد نشده' : `${short(r)} هر شیفت`}</i></button>`;
