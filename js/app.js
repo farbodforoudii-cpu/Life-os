@@ -468,7 +468,7 @@ const SHEETS = {
     }
     if (e.cat === 'client' && isActive(e)) {
       const pr = priceOf(e);
-      body += pr != null ? `<div class="price-line"><span>مبلغ این جلسه</span><b>${num(pr)} تومان</b><em>${e.price != null ? 'ثبت‌شده برای همین جلسه' : `از فهرست قیمت، ${sessionKind(e)}`}</em></div>`
+      body += pr != null ? `<div class="price-line"><span>مبلغ این جلسه</span><b>${num(pr)} تومان</b><button class="chip small" data-act="row-price" data-id="${e.id}">تغییر مبلغ</button><em>${e.price != null ? 'ثبت‌شده برای همین جلسه' : `از فهرست قیمت، ${sessionKind(e)}`}</em></div>`
         : g ? `<button class="wide-btn ghost" data-act="prices" data-id="${g.id}">قیمت وارد نشده؛ بزن تا وارد کنی</button>` : '';
     }
     if (e.cat === 'client' && isActive(e) && st === 'done') {
@@ -617,6 +617,8 @@ const SHEETS = {
     const lang = v.g.invoiceLang === 'en' ? 'en' : 'fa';
     return sheetHead('فاکتور', `<div class="seg"><button class="${lang === 'fa' ? 'on' : ''}" data-invlang="fa">فارسی</button><button class="${lang === 'en' ? 'on' : ''}" data-invlang="en">English</button></div>`) + `
       <div class="inv-prev"><img id="invImg" alt="پیش‌نمایش فاکتور"></div>
+      <div class="sh-sub"><b>مبلغ هر جلسه</b><span class="eyebrow">روی هر ردیف بزنید تا مبلغش را عوض کنید</span></div>
+      <div class="gp-list">${v.rows.map(r => `<button class="gp-hs" data-act="row-price" data-id="${r.e.id}"><b>${fa(r.n)}</b><span>${jFull(r.e.date)}<small>${sessionKind(r.e)}${r.e.price != null ? '، مبلغ جداگانهٔ همین جلسه' : '، از فهرست قیمت'}</small></span><em>${r.price != null ? short(r.price) : 'بدون قیمت'}</em></button>`).join('')}</div>
       ${v.missing ? `<button class="wide-btn ghost" data-act="prices" data-id="${v.g.id}">${fa(v.missing)} جلسه قیمت ندارد؛ بزن تا وارد کنی</button>` : ''}
       <p class="hint">جمع = مجموع مبلغ ${fa(v.rows.length)} جلسهٔ این دوره. مبلغ هر جلسه از فهرست قیمت مراجع و بر اساس تعداد حاضران همان جلسه است، مگر برای آن جلسه مبلغ جداگانه ثبت شده باشد.${left ? ` ${fa(left)} جلسه هنوز برگزار نشده است.` : ''}</p>
       <button class="wide-btn" data-act="inv-image" data-id="${v.s.id}">ارسال تصویر فاکتور</button>
@@ -889,6 +891,14 @@ document.addEventListener('click', async ev => {
     return;
   }
   if (act === 'prices') { openSheet('prices', { id: t.closest('[data-act]').dataset.id, back: s ? { ...s } : null }); return; }
+  if (act === 'row-price') {
+    const e = store.get(t.closest('[data-act]').dataset.id), pr = priceOf(e);
+    const v = prompt(`مبلغ جلسهٔ ${jFull(e.date)} به تومان\n(خالی = از فهرست قیمت مراجع)`, pr != null ? money(pr) : '');
+    if (v === null) return;
+    e.price = toNum(v); logChange(e, { price: e.price });
+    await store.put(e); await render(false); renderSheet();
+    toast(e.price != null ? `مبلغ این جلسه: ${money(e.price)} تومان` : 'مبلغ از فهرست قیمت گرفته می‌شود'); return;
+  }
   if (act === 'shift-pay') {
     const title = t.closest('[data-act]').dataset.t, cur = shiftRate(title);
     const v = prompt(`مبلغ هر شیفت «${title}» به تومان (خالی = حساب نشود)`, cur != null ? money(cur) : '');
