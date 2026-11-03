@@ -158,6 +158,7 @@ function week() {
     ${store.all('template').length ? '' : `<div class="card empty" style="margin-top:14px"><b>هنوز الگوی هفته نداری</b>«الگوی هفته» را بزن و برنامهٔ ثابتت را یک بار وارد کن؛ از آن به بعد هر هفته خودکار پر می‌شود.</div>`}`;
 }
 
+let gordanHTML = '';
 // A small ring: how far a package has come (done of size), the count in its centre.
 function ring(done, size, px = 54) {
   const r = 22, c = 2 * Math.PI * r, p = size ? Math.min(1, done / size) : 0, full = size && done >= size;
@@ -211,8 +212,13 @@ function clients() {
     const n = store.all('entry').filter(e => e.title === t && isActive(e) && monthKeyOf(e.date) === k && ['done', 'now'].includes(liveStatus(e, now))).length, r = shiftRate(t);
     return `<button class="sh-row" data-act="shift-pay" data-t="${esc(t)}"><span><b>${esc(t)}</b><small>${fa(n)} شیفت در ${mName(k)}</small></span><i class="pl ${r == null ? 'dim' : ''}">${r == null ? 'مبلغ وارد نشده' : `${short(r)} هر شیفت`}</i></button>`;
   }).join('');
-  const shiftsH = titles.length ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌ها</b>${gRows ? `<button class="pill-btn" data-act="gordan-rate">هر شاگرد ${short(G.perHead)}</button>` : ''}</div>
-    ${gRows ? `<p class="hint">گردان: پیش‌بینی = تعداد شاگردها × ${short(G.perHead)}. روی هر ماه بزنید و حقوق همان ماه را بنویسید؛ گردان آن را حدود ۱۷ و ۱۸ ماه بعد واریز می‌کند.</p>${gRows}` : ''}${others}</div>` : '';
+  // Gordan opens as its own page; here only a one-line summary: the salary on its way (last month's).
+  const due = gordanMonth(shiftMonth(k, -1), now);
+  gordanHTML = gRows ? `<p class="hint">پیش‌بینی = تعداد شاگردها × ${short(G.perHead)}. روی هر ماه بزنید و حقوق همان ماه را بنویسید؛ گردان آن را حدود ۱۷ و ۱۸ ماه بعد واریز می‌کند.</p>
+    <button class="wide-btn ghost" data-act="gordan-rate">سهم هر شاگرد: ${short(G.perHead)}</button><div class="gp-list">${gRows}</div>` : '';
+  const gordanH = gRows ? `<button class="cl2 gd-open" data-act="gordan-open"><span class="cl2-txt"><b>گردان</b><small>${due.paid ? `حقوق ${mName(shiftMonth(k, -1))}: ${short(due.paid)}` : `حقوق ${mName(shiftMonth(k, -1))}، حدود ۱۷ ${mName(k)}: پیش‌بینی ${short(due.est * G.perHead)}`}</small>
+      <span class="cl2-pills"><i class="pl">${short(G.perHead)} هر شاگرد</i></span></span><span class="cl2-go" aria-hidden="true">‹</span></button>` : '';
+  const shiftsH = gordanH + (others ? `<div class="card sh-card"><div class="sh-card-h"><b>شیفت‌های دیگر</b></div>${others}</div>` : '');
   return `<div class="head"><div><div class="eyebrow">دوره‌ها، جلسه‌ها و پرداخت‌ها</div><h1 class="big">مراجع‌ها</h1></div>
       <button class="pill-btn" data-act="group-new">+ مراجع جدید</button></div>
     ${top}${readyH}${list.length ? `<div class="cl2-list stagger">${cards}</div>` : empty('هنوز مراجعی ثبت نشده', '«مراجع جدید» را بزن: نام گروه، اعضا و تعداد جلسه‌های دوره. شمارهٔ جلسه‌ها از آن به بعد خودکار حساب می‌شود.')}${shiftsH}`;
@@ -414,6 +420,7 @@ function toast(msg, undo) {
 // One bottom sheet (a centred card on iPad) whose content depends on what was opened.
 function openSheet(kind, data = {}) {
   state.sheet = { kind, ...data };
+  $('#sheet').dataset.kind = kind;
   renderSheet();
   $('#sheet').classList.add('on');
   $('#scrim').classList.add('on');
@@ -634,6 +641,8 @@ const SHEETS = {
       <button class="wide-btn ${v.s.paid ? 'ghost' : ''}" data-paid="${v.s.id}">${v.s.paid ? 'پرداخت ثبت شده؛ برداشتن' : 'مبلغ این دوره رسید'}</button>
       <div class="chips"><button class="chip small" data-act="group-edit" data-id="${v.g.id}">اطلاعات تماس مراجع</button><button class="chip small" data-act="profile">اطلاعات پرداخت شما</button></div>`;
   },
+
+  gordanInfo() { return sheetHead('گردان') + (gordanHTML || '<p class="hint">شیفت گردانی در برنامه نیست.</p>'); },
 
   profile() {
     const pr = profile();
@@ -907,6 +916,7 @@ document.addEventListener('click', async ev => {
     await store.put(e); await render(false); renderSheet();
     toast(e.price != null ? `مبلغ این جلسه: ${money(e.price)} تومان` : 'مبلغ از فهرست قیمت گرفته می‌شود'); return;
   }
+  if (act === 'gordan-open') { openSheet('gordanInfo'); return; }
   if (act === 'gordan-rate' || act === 'gordan-paid') {
     const G = { ...gordan(), paid: { ...gordan().paid } }, mk = t.closest('[data-act]').dataset.m;
     const v = act === 'gordan-rate' ? prompt('سهم شما از هر شاگرد در هر جلسه، به تومان', money(G.perHead))
@@ -914,7 +924,7 @@ document.addEventListener('click', async ev => {
     if (v === null) return;
     const n = toNum(v);
     if (act === 'gordan-rate') { if (!n) return; G.perHead = n; } else if (n) G.paid[mk] = n; else delete G.paid[mk];
-    await store.put(G); await render(false); toast('ذخیره شد'); return;
+    await store.put(G); await render(false); if (state.sheet?.kind === 'gordanInfo') renderSheet(); toast('ذخیره شد'); return;
   }
   if (act === 'shift-pay') {
     const title = t.closest('[data-act]').dataset.t, cur = shiftRate(title);

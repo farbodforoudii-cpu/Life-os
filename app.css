@@ -546,3 +546,6 @@ input{font-family:inherit}
 .gp-hs em{font-style:normal;font-size:13px;font-weight:700}
 .gp-hs.cancelled>b{background:var(--burg-soft);color:var(--burg)}
 .gp-hs.cancelled span{color:var(--muted)}
+.gd-open{margin-bottom:14px}
+#sheet .gp-list .sh-row{border-top:0;border-bottom:1px solid var(--sep)}
+#sheet[data-kind="gordanInfo"]{max-height:96vh;min-height:92vh}
