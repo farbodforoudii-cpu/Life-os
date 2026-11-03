@@ -253,6 +253,9 @@ export function gordanMonth(k, now = new Date()) {
   const known = xs.filter(e => e.headcount != null), heads = known.reduce((s, e) => s + e.headcount, 0);
   let est = heads;
   for (const e of xs) if (e.headcount == null) est += usualShiftHeads(e.title) || 0;
+  // A month counted from Gordan's own figures (total students of both branches) wins over the shifts' counts.
+  const total = gordan().heads?.[k];
+  if (total != null) return { shifts: xs.length, counted: xs.length, heads: total, est: total, paid: gordan().paid[k] ?? null, total: true };
   return { shifts: xs.length, counted: known.length, heads, est: Math.round(est), paid: gordan().paid[k] ?? null };
 }
 
