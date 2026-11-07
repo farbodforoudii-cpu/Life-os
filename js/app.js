@@ -3,7 +3,7 @@ import { store } from './store.js';
 import { sync } from './sync.js';
 import { faDigits, WEEKDAYS, MONTHS, toJalali, fromJalali, shiftMonth, monthLabel, monthRange } from './jalali.js';
 import {
-  CATS, CANCEL_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
+  CATS, CANCEL_REASONS, OLD_REASONS, WEEK_ORDER, EVEN_DAYS, ODD_DAYS, uid, dayKey, fromDayKey, addDays, minutesNow, todayKey,
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
@@ -493,7 +493,7 @@ const SHEETS = {
     }
     if (isActive(e)) {
       body += `<div class="eyebrow">لغو شد؟ دلیلش را انتخاب کن</div>
-        <div class="chips">${CANCEL_REASONS.filter(r => e.cat === 'uni' ? r !== 'مراجع نیومد' && r !== 'مراجع خبر داد' : r !== 'استاد نیومد').map(r => `<button class="chip cancel-chip" data-cancel="${r}">${r}</button>`).join('')}<button class="chip cancel-chip" data-cancel="">بدون دلیل</button></div>
+        <div class="chips">${CANCEL_REASONS.filter(r => e.cat === 'uni' ? r !== 'مراجع نیامد' && r !== 'مراجع خبر داد' : r !== 'استاد نیامد').map(r => `<button class="chip cancel-chip" data-cancel="${r}">${r}</button>`).join('')}<button class="chip cancel-chip" data-cancel="">بدون دلیل</button></div>
         <div class="eyebrow">جابه‌جا شد؟ روز جدید</div>${dayChips(null, 'data-moveday')}`;
     } else {
       body += `<button class="wide-btn" data-act="restore">بازگرداندن به برنامه</button>`;
@@ -531,7 +531,7 @@ const SHEETS = {
       ${timeInputs(t.start, t.end)}
       <div class="eyebrow">نوع</div>${catChips(draft.cat)}
       ${draft.cat === 'client' ? `<div class="eyebrow">کدوم مراجع؟</div><div class="chips">${gs.map(g => `<button class="chip ${draft.groupId === g.id ? 'sel' : ''}" data-tplgroup="${g.id}">${esc(g.name)}</button>`).join('')}<button class="chip" data-act="group-new" data-back="tpl">+ مراجع جدید</button></div>` : ''}
-      <label class="fld">عنوان${draft.cat === 'client' ? ' (اگه خالی بمونه، اسم مراجع)' : ''}<input id="fTitle" value="${esc(t.title)}" placeholder="${draft.cat === 'shift' ? 'مثلاً گردان فرشته' : draft.cat === 'uni' ? 'مثلاً تفسیر قرآن' : ''}"></label>
+      <label class="fld">عنوان${draft.cat === 'client' ? ' (اگر خالی بماند، نام مراجع)' : ''}<input id="fTitle" value="${esc(t.title)}" placeholder="${draft.cat === 'shift' ? 'مثلاً گردان فرشته' : draft.cat === 'uni' ? 'مثلاً تفسیر قرآن' : ''}"></label>
       ${draft.cat === 'shift' ? `<label class="fld">تعداد معمول شاگردها (اختیاری)<input id="fHead" type="text" inputmode="numeric" autocomplete="off" value="${t.headcount != null ? fa(t.headcount) : ''}"></label>` : ''}
       <button class="wide-btn" data-act="save-tpl">ذخیره</button>
       ${s.id ? '<button class="wide-btn danger" data-act="delete-tpl">حذف از الگو (از امروز به بعد)</button>' : ''}`;
@@ -1162,6 +1162,10 @@ function setupUpdates() {
 (async function boot() {
   renderTabs();
   try { await store.load(); } catch { /* start empty */ }
+  // One-time: cancel reasons written in the earlier colloquial wording take the refined one.
+  const oldR = store.all('entry').filter(e => OLD_REASONS[e.reason]);
+  for (const e of oldR) e.reason = OLD_REASONS[e.reason];
+  if (oldR.length) await store.put(...oldR);
   await sync.init();
   await render();
   requestPersistence();

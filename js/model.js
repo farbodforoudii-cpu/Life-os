@@ -17,7 +17,9 @@ export const DEFAULT_PRESETS = [
   { title: 'خرید', cat: 'personal' },
 ];
 
-export const CANCEL_REASONS = ['مراجع نیومد', 'مراجع خبر داد', 'خودم نتونستم', 'تعطیلی', 'استاد نیومد'];
+export const CANCEL_REASONS = ['مراجع نیامد', 'مراجع خبر داد', 'خودم نتوانستم', 'تعطیلی', 'استاد نیامد'];
+// Earlier, colloquial wording of the same reasons; stored entries are moved to the new wording once.
+export const OLD_REASONS = { 'مراجع نیومد': 'مراجع نیامد', 'خودم نتونستم': 'خودم نتوانستم', 'استاد نیومد': 'استاد نیامد' };
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -129,8 +131,17 @@ export async function applyTemplate(tpl) {
 
 // ---------- groups & series ----------
 export const groups = () => store.all('group').filter(g => !g.archived).sort((a, b) => a.name.localeCompare(b.name, 'fa'));
-export const seriesOf = gid => store.all('series').filter(s => s.groupId === gid).sort((a, b) => a.start.localeCompare(b.start));
-export const sessionsOf = gid => store.all('entry').filter(e => e.groupId === gid && isActive(e)).sort(byTime);
+export const seriesOf = gid => {
+  if (!seriesCache.has(gid)) seriesCache.set(gid, store.all('series').filter(s => s.groupId === gid).sort((a, b) => a.start.localeCompare(b.start)));
+  return [...seriesCache.get(gid)];
+};
+// A group's sessions and packages are read many times per screen; both are cached until anything changes.
+const sessCache = new Map(), seriesCache = new Map();
+store.onChange(() => { sessCache.clear(); seriesCache.clear(); });
+export const sessionsOf = gid => {
+  if (!sessCache.has(gid)) sessCache.set(gid, store.all('entry').filter(e => e.groupId === gid && isActive(e)).sort(byTime));
+  return sessCache.get(gid);
+};
 
 // Each session takes the earliest package that has started by its date and still has room.
 // Cancelled or moved sessions never use up a package.
