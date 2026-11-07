@@ -78,7 +78,7 @@ Farbod chose to keep the two apps separate and link them through the shared Supa
 them into one PWA (which the iOS storage limit would otherwise require).
 - Both apps sync into `public.eco_items` (one space per sync code; the server stores only the code's SHA-256);
   column `app` = `life` | `hesab`. Each app pulls its own rows; hesab-man also reads life `bill` / `payment` rows. One code joins every device and both apps
-  (1405/08/04: Farbod chose a code over email/password for simplicity). `public.life_items` is the old, unused table.
+  (1405/08/04: Farbod chose a code over email/password for simplicity). The old table `life_items` and the rows of unused test spaces are archived in schema `archive` (never delete; archive).
 - Done 1405/08/04: (a) prices per headcount on groups (with history) and per session, invoices per package; (b)+(c) finished
   packages become `bill_<series>` rows that hesab-man shows in an inbox, its one-tap answer `pay_<series>` marks the
   package paid (format: hesab-man `docs/ECOSYSTEM.md` §1).
