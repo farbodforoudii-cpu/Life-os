@@ -9,7 +9,9 @@ const T = '2026-01-01T00:00:00.000Z', stamp = o => ({ createdAt: T, updatedAt: T
 const day = off => { const d = new Date(); d.setDate(d.getDate() + off); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const items = [
   stamp({ id: 'gA', kind: 'group', name: 'گروه الف', members: ['یک', 'دو'], prices: [{ from: day(-60), by: { 1: 1000000, 2: 2000000 } }] }),
-  stamp({ id: 'gB', kind: 'group', name: 'گروه ب', members: ['سه'] }),
+  stamp({ id: 'gB', kind: 'group', name: 'گروه ب', members: ['سه'], prices: [{ from: day(-90), by: { 1: 2000000 } }] }),
+  stamp({ id: 'sB1', kind: 'series', groupId: 'gB', size: 8, start: day(3), paid: false, offset: 0 }),
+  stamp({ id: 'tplB', kind: 'template', from: day(-30), days: [1, 3], start: 540, end: 630, title: 'گروه ب', cat: 'client', groupId: 'gB' }),
   stamp({ id: 'sA1', kind: 'series', groupId: 'gA', size: 3, start: day(-20), paid: true, offset: 0 }),
   stamp({ id: 'sA2', kind: 'series', groupId: 'gA', size: 3, start: day(-8), paid: false, offset: 0 }),
   ...[-20, -18, -15].map((o, i) => stamp({ id: `a${i}`, kind: 'entry', date: day(o), start: 600, end: 690, title: 'گروه الف', cat: 'client', groupId: 'gA', status: 'planned', source: 'manual' })),
@@ -41,11 +43,13 @@ for (const [tag, vp, scheme] of [['phone', { width: 390, height: 844 }, 'light']
       const m = await import('./js/model.js'), { store } = await import('./js/store.js');
       const nums = m.numberSessions('gA'), n = id => { const x = nums.get(id); return x ? `${x.series.id}#${x.n}` : null; };
       const inv = m.invoiceOf('sA2');
+      const pro = m.invoiceOf('sB1', { project: true });
       return { numbering: ['a0', 'a1', 'a2', 'aX', 'a3', 'a5'].map(n), price1: m.priceOf(store.get('a3')), priceList: m.priceOf(store.get('a0')), own: m.priceOf(store.get('a5')),
-        invTotal: inv.total, reason: store.get('a4').reason, outsideWaiting: m.awaitingPayment().some(e => e.id === 'aX') };
+        invTotal: inv.total, proRows: pro.rows.length, proTotal: pro.total, pro: pro.pro, proFrom: pro.rows[0].e.date >= m.dayKey(new Date(Date.now() + 3 * 864e5 - 864e5)), reason: store.get('a4').reason, outsideWaiting: m.awaitingPayment().some(e => e.id === 'aX') };
     });
     check('package numbering', r.numbering, ['sA1#1', 'sA1#2', 'sA1#3', null, 'sA2#1', 'sA2#2']);
     check('price for one person', r.price1, 1000000); check('price from list, two people', r.priceList, 2000000); check('session’s own price', r.own, 2500000);
+    check('proforma: whole package of 8', [r.proRows, r.proTotal, r.pro, r.proFrom], [8, 16000000, true, true]);
     check('cancel reason migrated', r.reason, 'مراجع نیامد'); check('session outside packages waits for payment', r.outsideWaiting, true);
     // sA2 holds a3, a5 and the next pattern session (today or later, from the list for two people).
     if (r.invTotal < 3500000) fails.push(`invoice total too small: ${r.invTotal}`);

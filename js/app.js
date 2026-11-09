@@ -553,13 +553,13 @@ const SHEETS = {
           <b>${st.left <= 0 ? 'دوره تمام شد' : `${fa(st.left)} جلسه مانده`}</b>
           <small>${st.next ? `جلسهٔ بعد: ${weekdayName(fromDayKey(st.next.date))} ${fmtTime(st.next.start)}` : 'جلسهٔ بعدی در برنامه نیست'}</small>
           <small>تا امروز ${short(doneVal)} تومان${vc && vc.total > doneVal ? `، کل دوره حدود ${short(vc.total)}` : ''}</small>
-          <span class="gp-acts"><button class="chip small ${cur.paid ? 'sel' : 'warn-chip'}" data-paid="${cur.id}">${cur.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button><button class="chip small" data-act="invoice" data-id="${cur.id}">فاکتور</button><button class="chip small" data-act="series-edit" data-id="${cur.id}">ویرایش دوره</button></span></div></div>` : '<button class="wide-btn" data-act="series-new">شروع نخستین دوره</button>'}
+          <span class="gp-acts"><button class="chip small ${cur.paid ? 'sel' : 'warn-chip'}" data-paid="${cur.id}">${cur.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button><button class="chip small" data-act="invoice" data-id="${cur.id}">${seriesDone(cur) ? 'فاکتور' : 'پیش‌فاکتور'}</button><button class="chip small" data-act="series-edit" data-id="${cur.id}">ویرایش دوره</button></span></div></div>` : '<button class="wide-btn" data-act="series-new">شروع نخستین دوره</button>'}
       <div class="sh-sub"><b>قیمت هر جلسه</b><button class="pill-btn" data-act="prices" data-id="${g.id}">تغییر قیمت</button></div>
       ${row ? `<div class="gp-prices">${Object.entries(row.by).map(([n, v]) => `<div><span>${n === '1' ? 'خصوصی' : `${fa(n)} نفر`}</span><b>${short(v)}</b></div>`).join('')}</div><p class="hint">از ${jFull(row.from)}، به تومان. مبلغ هر جلسه با تعداد حاضران همان جلسه حساب می‌شود.</p>` : `<button class="wide-btn ghost" data-act="prices" data-id="${g.id}">قیمت وارد نشده؛ بزن تا وارد کنی</button>`}
       <div class="sh-sub"><b>دوره‌ها</b><button class="pill-btn" data-act="series-new">+ دورهٔ جدید</button></div>
       <div class="gp-list">${series.length ? series.map(x => { const v = invoiceOf(x.id); return `<div class="gp-sr">
         <button class="gp-sr-main" data-act="series-edit" data-id="${x.id}"><b>${period(v)}</b><small>${fa(v.rows.length)} از ${fa(x.size)} جلسه${v.total ? `، ${short(v.total)} تومان` : ''}</small></button>
-        <button class="chip small" data-act="invoice" data-id="${x.id}">فاکتور</button><button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></div>`; }).join('') : '<p class="hint">هنوز دوره‌ای نیست.</p>'}</div>
+        <button class="chip small" data-act="invoice" data-id="${x.id}">${seriesDone(x) ? 'فاکتور' : 'پیش‌فاکتور'}</button><button class="chip small ${x.paid ? 'sel' : 'warn-chip'}" data-paid="${x.id}">${x.paid ? 'پرداخت شده' : 'پرداخت نشده'}</button></div>`; }).join('') : '<p class="hint">هنوز دوره‌ای نیست.</p>'}</div>
       <div class="sh-sub"><b>جلسه‌های اخیر</b></div>
       <div class="gp-list">${hist.length ? hist.map(e => { const n = nums.get(e.id), p = priceOf(e); return `<button class="gp-hs ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><b>${isActive(e) ? (n ? fa(n.n) : '–') : '✕'}</b><span>${jFull(e.date)}<small>${isActive(e) ? sessionKind(e) : (e.reason || 'لغو')}</small></span><em>${isActive(e) && p != null ? short(p) : ''}</em></button>`; }).join('') : '<p class="hint">هنوز جلسه‌ای ثبت نشده.</p>'}</div>`;
   },
@@ -626,18 +626,21 @@ const SHEETS = {
   },
 
   invoice(s) {
-    const v = invoiceOf(s.id);
+    const v = invoiceOf(s.id, { project: true });
     if (!v) return sheetHead('پیدا نشد');
     const left = v.rows.filter(r => !r.done).length;
     const lang = v.g.invoiceLang === 'en' ? 'en' : 'fa';
-    return sheetHead('فاکتور', `<div class="seg"><button class="${lang === 'fa' ? 'on' : ''}" data-invlang="fa">فارسی</button><button class="${lang === 'en' ? 'on' : ''}" data-invlang="en">English</button></div>`) + `
+    return sheetHead(v.pro ? 'پیش‌فاکتور' : 'فاکتور', `<div class="seg"><button class="${lang === 'fa' ? 'on' : ''}" data-invlang="fa">فارسی</button><button class="${lang === 'en' ? 'on' : ''}" data-invlang="en">English</button></div>`) + `
       <div class="inv-prev"><img id="invImg" alt="پیش‌نمایش فاکتور"></div>
-      <div class="sh-sub"><b>مبلغ هر جلسه</b><span class="eyebrow">روی هر ردیف بزنید تا مبلغش را عوض کنید</span></div>
-      <div class="gp-list">${v.rows.map(r => `<button class="gp-hs" data-act="row-price" data-id="${r.e.id}"><b>${fa(r.n)}</b><span>${jFull(r.e.date)}<small>${sessionKind(r.e)}${r.e.price != null ? '، مبلغ جداگانهٔ همین جلسه' : '، از فهرست قیمت'}</small></span><em>${r.price != null ? short(r.price) : 'بدون قیمت'}</em></button>`).join('')}</div>
+      <div class="sh-sub"><b>مبلغ هر جلسه</b><span class="eyebrow">${v.projected === v.rows.length ? 'از فهرست قیمت؛ با «تغییر قیمت» عوض می‌شود' : 'روی هر جلسهٔ ثبت‌شده بزنید تا مبلغش را عوض کنید'}</span></div>
+      <div class="gp-list">${v.rows.map(r => r.projected
+        ? `<div class="gp-hs proj"><b>${fa(r.n)}</b><span>${jFull(r.e.date)}<small>${sessionKind(r.e)}، پیش‌بینی از برنامهٔ هفتگی</small></span><em>${r.price != null ? short(r.price) : 'بدون قیمت'}</em></div>`
+        : `<button class="gp-hs" data-act="row-price" data-id="${r.e.id}"><b>${fa(r.n)}</b><span>${jFull(r.e.date)}<small>${sessionKind(r.e)}${r.e.price != null ? '، مبلغ جداگانهٔ همین جلسه' : '، از فهرست قیمت'}</small></span><em>${r.price != null ? short(r.price) : 'بدون قیمت'}</em></button>`).join('')}</div>
       ${v.missing ? `<button class="wide-btn ghost" data-act="prices" data-id="${v.g.id}">${fa(v.missing)} جلسه قیمت ندارد؛ بزن تا وارد کنی</button>` : ''}
-      <p class="hint">جمع = مجموع مبلغ ${fa(v.rows.length)} جلسهٔ این دوره. مبلغ هر جلسه از فهرست قیمت مراجع و بر اساس تعداد حاضران همان جلسه است، مگر برای آن جلسه مبلغ جداگانه ثبت شده باشد.${left ? ` ${fa(left)} جلسه هنوز برگزار نشده است.` : ''}</p>
-      <button class="wide-btn" data-act="inv-image" data-id="${v.s.id}">ارسال تصویر فاکتور</button>
-      <button class="wide-btn ghost" data-act="inv-text" data-id="${v.s.id}">کپی متن فاکتور</button>
+      ${v.unplanned ? `<p class="hint warn">${fa(v.unplanned)} جلسه از ${fa(v.s.size)} جلسهٔ دوره در برنامهٔ هفتگی جا ندارد و در جمع نیامده است.</p>` : ''}
+      <p class="hint">جمع = مجموع مبلغ ${fa(v.rows.length)} جلسهٔ این دوره. مبلغ هر جلسه از فهرست قیمت مراجع و بر اساس تعداد حاضران همان جلسه است، مگر برای آن جلسه مبلغ جداگانه ثبت شده باشد.${left ? ` ${fa(left)} جلسه هنوز برگزار نشده است${v.projected ? `؛ تاریخ ${fa(v.projected)} جلسه از برنامهٔ هفتگی پیش‌بینی شده و ممکن است جابه‌جا شود` : ''}.` : ''}</p>
+      <button class="wide-btn" data-act="inv-image" data-id="${v.s.id}">ارسال تصویر ${v.pro ? 'پیش‌فاکتور' : 'فاکتور'}</button>
+      <button class="wide-btn ghost" data-act="inv-text" data-id="${v.s.id}">کپی متن ${v.pro ? 'پیش‌فاکتور' : 'فاکتور'}</button>
       <button class="wide-btn ${v.s.paid ? 'ghost' : ''}" data-paid="${v.s.id}">${v.s.paid ? 'پرداخت ثبت شده؛ برداشتن' : 'مبلغ این دوره رسید'}</button>
       <div class="chips"><button class="chip small" data-act="group-edit" data-id="${v.g.id}">اطلاعات تماس مراجع</button><button class="chip small" data-act="profile">اطلاعات پرداخت شما</button></div>`;
   },
@@ -690,8 +693,8 @@ function priceList(g) {
 const EN_MONTHS = ['Farvardin', 'Ordibehesht', 'Khordad', 'Tir', 'Mordad', 'Shahrivar', 'Mehr', 'Aban', 'Azar', 'Dey', 'Bahman', 'Esfand'];
 const EN_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const INV = {
-  fa: { title: 'فاکتور جلسه‌های تمرین', n: 'جلسه', date: 'تاریخ', kind: 'نوع', amount: 'مبلغ (تومان)', total: 'جمع', unit: 'تومان', paid: 'پرداخت شد', card: 'شمارهٔ کارت', iban: 'شمارهٔ شبا', to: 'به نام' },
-  en: { title: 'Training invoice', n: '#', date: 'Date', kind: 'Session', amount: 'Amount (Toman)', total: 'Total', unit: 'Toman', paid: 'Paid', card: 'Card number', iban: 'IBAN', to: 'Payable to' },
+  fa: { title: 'فاکتور جلسه‌های تمرین', pro: 'پیش‌فاکتور جلسه‌های تمرین', proNote: 'تاریخ‌ها بر اساس برنامهٔ هفتگی',  n: 'جلسه', date: 'تاریخ', kind: 'نوع', amount: 'مبلغ (تومان)', total: 'جمع', unit: 'تومان', paid: 'پرداخت شد', card: 'شمارهٔ کارت', iban: 'شمارهٔ شبا', to: 'به نام' },
+  en: { title: 'Training invoice', pro: 'Proforma invoice, training sessions', proNote: 'Dates follow the weekly schedule',  n: '#', date: 'Date', kind: 'Session', amount: 'Amount (Toman)', total: 'Total', unit: 'Toman', paid: 'Paid', card: 'Card number', iban: 'IBAN', to: 'Payable to' },
 };
 function invoiceParts(v) {
   const lang = v.g.invoiceLang === 'en' ? 'en' : 'fa', en = lang === 'en', pr = profile();
@@ -703,7 +706,7 @@ function invoiceParts(v) {
   const period = months.length ? `${mName(months[0])}${months.length > 1 ? `–${mName(months[months.length - 1])}` : ''} ${d(months[months.length - 1].jy)}` : '';
   const kind = e => { const h = headcount(e); return h === 1 ? (en ? 'Private' : 'خصوصی') : en ? `Group${h ? ` (${h})` : ''}` : `گروهی${h ? `، ${fa(h)} نفر` : ''}`; };
   return {
-    lang, L: INV[lang], name: en ? (v.g.invoiceName || v.g.name) : v.g.name, period,
+    lang, L: INV[lang], pro: v.pro, heading: v.pro ? INV[lang].pro : INV[lang].title, note: v.projected ? INV[lang].proNote : '', name: en ? (v.g.invoiceName || v.g.name) : v.g.name, period,
     rows: v.rows.map(r => ({ n: d(r.n), date: jd(r.e.date), kind: kind(r.e), amount: amount(r.price), done: r.done })),
     total: amount(v.total), paid: v.s.paid,
     payee: en ? (pr.nameEn || '') : (pr.name || ''),
@@ -713,7 +716,7 @@ function invoiceParts(v) {
 
 function invoiceText(v) {
   const x = invoiceParts(v), L = x.L, sep = x.lang === 'en' ? ', ' : '، ';
-  return [`${L.title}${sep}${x.name}`, x.period, '',
+  return [`${x.heading}${sep}${x.name}`, x.period, ...(x.note ? [x.note] : []), '',
     ...x.rows.map(r => `${r.n}. ${r.date}${sep}${r.kind}${sep}${r.amount}`), '',
     `${L.total}: ${x.total} ${L.unit}`,
     ...(x.card || x.iban ? ['', x.payee ? `${L.to} ${x.payee}` : '', x.card ? `${L.card}: ${x.card}` : '', x.iban ? `${L.iban}: ${x.iban}` : ''].filter((s, i) => i === 0 || s) : [])].join('\n');
@@ -732,15 +735,17 @@ async function invoiceImage(v) {
   const text = (s, px, py, size, weight, color, align = 'start') => { g.font = `${weight} ${size}px Vazirmatn, sans-serif`; g.fillStyle = color; g.textAlign = align; g.fillText(s, px, py); };
   const line = (py, w, color) => { g.strokeStyle = color; g.lineWidth = w; g.beginPath(); g.moveTo(P, py); g.lineTo(W - P, py); g.stroke(); };
   let y = P + 10;
-  text(L.title, at(0), y, 26, 600, C.muted); y += 70;
+  text(x.heading, at(0), y, 26, 600, C.muted); y += 70;
   text(x.name, at(0), y, 56, 800, C.ink); y += 62;
-  text(x.period, at(0), y, 30, 400, C.muted); y += 90;
+  text(x.period, at(0), y, 30, 400, C.muted);
+  if (x.note) { y += 46; text(x.note, at(0), y, 24, 400, C.muted); }
+  y += 90;
   const cols = [0, 90, 470];
   [L.n, L.date, L.kind].forEach((h, i) => text(h, at(cols[i]), y, 24, 600, C.muted));
   text(L.amount, end, y, 24, 600, C.muted, 'end');
   y += 34; line(y, 2, C.sep);
   for (const r of x.rows) {
-    const my = y + RH / 2, col = r.done ? C.ink : C.muted;
+    const my = y + RH / 2, col = r.done || x.pro ? C.ink : C.muted;
     text(r.n, at(cols[0]), my, 26, 600, C.muted);
     text(r.date, at(cols[1]), my, 30, 400, col);
     text(r.kind, at(cols[2]), my, 28, 400, C.muted);
@@ -768,7 +773,7 @@ async function invoiceImage(v) {
 let invUrl;
 async function fillInvoicePreview(id) {
   const img = $('#invImg'); if (!img) return;
-  const blob = await invoiceImage(invoiceOf(id));
+  const blob = await invoiceImage(invoiceOf(id, { project: true }));
   if (invUrl) URL.revokeObjectURL(invUrl);
   invUrl = URL.createObjectURL(blob);
   if ($('#invImg')) $('#invImg').src = invUrl;
@@ -936,8 +941,8 @@ document.addEventListener('click', async ev => {
   }
   if (act === 'invoice') { openSheet('invoice', { id: t.closest('[data-act]').dataset.id }); return; }
   if (act === 'profile') { openSheet('profile', { back: s ? { ...s } : null }); return; }
-  if (act === 'inv-image') { const v = invoiceOf(t.closest('[data-act]').dataset.id); await shareFile(await invoiceImage(v), `${v.g.invoiceLang === 'en' ? 'Invoice' : 'فاکتور'} ${v.g.invoiceLang === 'en' ? (v.g.invoiceName || v.g.name) : v.g.name}.png`); return; }
-  if (act === 'inv-text') { await copyText(invoiceText(invoiceOf(t.closest('[data-act]').dataset.id))); toast('متن فاکتور کپی شد'); return; }
+  if (act === 'inv-image') { const v = invoiceOf(t.closest('[data-act]').dataset.id, { project: true }); await shareFile(await invoiceImage(v), `${v.g.invoiceLang === 'en' ? (v.pro ? 'Proforma' : 'Invoice') : (v.pro ? 'پیش‌فاکتور' : 'فاکتور')} ${v.g.invoiceLang === 'en' ? (v.g.invoiceName || v.g.name) : v.g.name}.png`); return; }
+  if (act === 'inv-text') { const v = invoiceOf(t.closest('[data-act]').dataset.id, { project: true }); await copyText(invoiceText(v)); toast(`متن ${v.pro ? 'پیش‌فاکتور' : 'فاکتور'} کپی شد`); return; }
 
   if (!s) return;
 

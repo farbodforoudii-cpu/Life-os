@@ -549,3 +549,7 @@ input{font-family:inherit}
 .gd-open{margin-bottom:14px}
 #sheet .gp-list .sh-row{border-top:0;border-bottom:1px solid var(--sep)}
 #sheet[data-kind="gordanInfo"]{max-height:96vh;min-height:92vh}
+/* Proforma: sessions predicted from the weekly pattern, not yet in the calendar */
+.gp-hs.proj>b{background:none;box-shadow:0 0 0 1px var(--sage) inset;opacity:.75}
+.gp-hs.proj>span{opacity:.75}
+.hint.warn{color:var(--burg)}

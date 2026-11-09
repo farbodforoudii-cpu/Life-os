@@ -223,12 +223,31 @@ export function priceOf(e) {
 export const sessionKind = e => headcount(e) === 1 ? 'خصوصی' : `گروهی${headcount(e) ? `، ${faDigits(headcount(e))} نفر` : ''}`;
 export const money = n => n == null ? '—' : Number(n).toLocaleString('fa-IR');
 // Every session a package holds, in order, with what it costs.
-export function invoiceOf(seriesId) {
+// With `project`, a package not yet full is completed from the weekly pattern (sessions not in the calendar yet,
+// priced from the list): what a proforma for the whole package shows before it is held.
+export function invoiceOf(seriesId, { project = false } = {}) {
   const s = store.get(seriesId);
   if (!s) return null;
   const nums = numberSessions(s.groupId);
   const rows = sessionsOf(s.groupId).filter(e => nums.get(e.id)?.series === s).map(e => ({ e, n: nums.get(e.id).n, price: priceOf(e), done: liveStatus(e) === 'done' }));
-  return { s, g: store.get(s.groupId), rows, total: rows.reduce((a, r) => a + (r.price || 0), 0), missing: rows.filter(r => r.price == null).length };
+  let unplanned = 0;
+  if (project) {
+    const want = s.size - (s.offset || 0), tpls = store.all('template').filter(t => t.groupId === s.groupId && !t.deleted);
+    const last = rows.length ? rows[rows.length - 1].e.date : null;
+    const from = [last, dayKey(addDays(fromDayKey(s.start), -1)), todayKey()].filter(Boolean).sort().pop();
+    let n = rows.length ? rows[rows.length - 1].n : s.offset || 0;
+    for (let d = addDays(fromDayKey(from), 1), i = 0; rows.length < want && tpls.length && i < 366; d = addDays(d, 1), i++) {
+      const k = dayKey(d);
+      for (const tpl of tpls) {
+        if (rows.length >= want || !tplCovers(tpl, k, d) || store.raw(tplEntryId(tpl, k))) continue;
+        const e = fromTemplate(tpl, k);
+        rows.push({ e, n: ++n, price: priceOf(e), done: false, projected: true });
+      }
+    }
+    unplanned = Math.max(0, want - rows.length);
+  }
+  return { s, g: store.get(s.groupId), rows, total: rows.reduce((a, r) => a + (r.price || 0), 0), missing: rows.filter(r => r.price == null).length,
+    pro: rows.some(r => !r.done) || unplanned > 0, projected: rows.filter(r => r.projected).length, unplanned };
 }
 export const profile = () => store.get('profile') || { id: 'profile', kind: 'profile' };
 
