@@ -125,6 +125,12 @@ export async function applyTemplate(tpl) {
     Object.assign(e, { start: tpl.start, end: tpl.end, title: tpl.title, cat: tpl.cat, groupId: tpl.groupId || null });
     changed.push(e);
   }
+  // Sessions the row dropped earlier (an end date that was later moved or removed) come back when it covers them again.
+  for (const e of store.everything()) {
+    if (!e.deleted || e.kind !== 'entry' || e.templateId !== tpl.id || e.date <= today || (e.history && e.history.length) || !tplCovers(tpl, e.date, fromDayKey(e.date))) continue;
+    delete e.deleted; Object.assign(e, { start: tpl.start, end: tpl.end, title: tpl.title, cat: tpl.cat, groupId: tpl.groupId || null });
+    changed.push(e);
+  }
   if (removed.length) await store.remove(...removed);
   if (changed.length) await store.put(...changed);
 }
@@ -422,24 +428,95 @@ export function headcountChoices(e) {
 // How long a new item usually lasts: the most common length of earlier timed items with the same client
 // or title, then the weekly pattern, then a plain default per category.
 const DEFAULT_MINUTES = { client: 90, shift: 90, uni: 60, personal: 60 };
+// The usual length is what the last few times actually took (the most frequent of the last six, ties to the newest),
+// so a change of habit shows up within a week instead of being outvoted by months of history.
 export function usualMinutes({ title, cat, groupId }) {
-  const same = x => (groupId ? x.groupId === groupId : x.title === title);
-  const counts = new Map();
-  for (const e of store.all('entry')) if (same(e) && !e.untimed && e.end > e.start) counts.set(e.end - e.start, (counts.get(e.end - e.start) || 0) + 1);
-  if (counts.size) return [...counts].sort((a, b) => b[1] - a[1])[0][0];
+  const same = x => (groupId ? x.groupId === groupId : x.title === title), today = todayKey();
+  const xs = store.all('entry').filter(e => same(e) && isActive(e) && !e.untimed && e.end > e.start && e.date <= today).sort(byTime).slice(-6);
+  if (xs.length) {
+    const c = new Map(); xs.forEach((e, i) => { const m = e.end - e.start, v = c.get(m) || { n: 0, last: 0 }; c.set(m, { n: v.n + 1, last: i }); });
+    return [...c].sort((a, b) => b[1].n - a[1].n || b[1].last - a[1].last)[0][0];
+  }
   const tpl = store.all('template').find(x => !x.deleted && same(x));
   return tpl ? tpl.end - tpl.start : DEFAULT_MINUTES[cat] || 60;
 }
 
-// Frequent titles first, then the generic defaults that are not already in the list.
-// With a day and a minute, what usually happens on that weekday around that time comes first.
-export function learnedPresets(limit = 10, ctx = null) {
-  // What was actually done in the last three months, typed by hand or brought in from the old schedule.
-  const counts = new Map(), since = dayKey(addDays(new Date(), -90));
+// ---------- learning from what was actually done ----------
+// A past day counts less the older it is: this week ≈ 1, a month ago ≈ 0.37, three months ago ≈ 0.04.
+const ageWeight = (k, now = new Date()) => Math.exp(-Math.max(0, (fromDayKey(dayKey(now)) - fromDayKey(k)) / 864e5) / 28);
+// What usually happens on this weekday around this minute, best first. Every past session counts (typed, from the
+// weekly pattern, client sessions), weighted by how recent and how close in time it was.
+export function guessAt(date, minute, now = new Date()) {
+  const wd = fromDayKey(date).getDay(), today = dayKey(now), since = dayKey(addDays(now, -120));
+  const taken = entriesOn(date).filter(e => isActive(e) && Math.abs(e.start - minute) < 30);
+  const m = new Map();
   for (const e of store.all('entry')) {
-    if ((e.source !== 'manual' && e.source !== 'import') || e.groupId || e.movedFrom || e.date < since) continue;
+    if (!isActive(e) || e.untimed || e.date > today || e.date < since || fromDayKey(e.date).getDay() !== wd) continue;
+    const gap = Math.abs(e.start - minute);
+    if (gap > 30) continue;
+    const key = e.groupId || e.title;
+    if (taken.some(x => (x.groupId || x.title) === key)) continue;
+    const c = m.get(key) || { title: e.groupId ? (store.get(e.groupId)?.name || e.title) : e.title, cat: e.cat, groupId: e.groupId || null, score: 0, weeks: new Set(), starts: [] };
+    c.score += ageWeight(e.date, now) * (1 - gap / 45);
+    c.weeks.add(e.date); c.starts.push(e.start);
+    m.set(key, c);
+  }
+  const out = [...m.values()].map(c => ({ ...c, times: c.weeks.size })).sort((a, b) => b.score - a.score);
+  // Confident: seen at least twice lately and clearly ahead of the next guess.
+  if (out[0]) out[0].sure = out[0].score >= 0.9 && out[0].times >= 2 && (!out[1] || out[0].score >= 2 * out[1].score);
+  return out;
+}
+
+// Suggestions for the weekly pattern, read from the last four weeks. Nothing changes until the user taps «اعمال».
+export function patternTips(now = new Date()) {
+  const today = dayKey(now), since = dayKey(addDays(now, -28)), tips = [];
+  const live = store.all('template').filter(t => !t.deleted && (!t.until || t.until >= today));
+  const weekOf = k => dayKey(addDays(fromDayKey(k), -((fromDayKey(k).getDay() + 1) % 7)));
+  // 1) The same thing typed by hand on the same weekday and time in three of the last four weeks.
+  const rep = new Map();
+  for (const e of store.all('entry')) {
+    if (!isActive(e) || e.untimed || e.templateId || e.source === 'import' || e.movedFrom || e.date < since || e.date > today) continue;
+    const wd = fromDayKey(e.date).getDay(), slot = Math.round(e.start / 15) * 15, key = `${e.groupId || e.title}|${wd}|${slot}`;
+    const r = rep.get(key) || { title: e.title, cat: e.cat, groupId: e.groupId || null, wd, starts: [], weeks: new Set(), last: e.date };
+    r.starts.push(e.start); r.weeks.add(weekOf(e.date)); if (e.date > r.last) r.last = e.date;
+    rep.set(key, r);
+  }
+  for (const r of rep.values()) {
+    if (r.weeks.size < 3) continue;
+    const start = r.starts.sort((a, b) => a - b)[r.starts.length >> 1];
+    if (live.some(t => t.days.includes(r.wd) && (t.groupId ? t.groupId === r.groupId : t.title === r.title) && Math.abs(t.start - start) <= 20)) continue;
+    const mins = usualMinutes(r);
+    tips.push({ key: `add|${r.groupId || r.title}|${r.wd}|${start}`, kind: 'add', title: r.title, cat: r.cat, groupId: r.groupId, wd: r.wd, start, end: Math.min(start + mins, 24 * 60 - 1), after: r.last,
+      why: `در ${faDigits(r.weeks.size)} هفته از ۴ هفتهٔ اخیر، همین ساعت را دستی اضافه کرده‌اید.` });
+  }
+  // 2) A pattern row whose sessions keep being given another length.
+  for (const t of live) {
+    const xs = store.all('entry').filter(e => e.templateId === t.id && isActive(e) && !e.untimed && e.date <= today && e.date >= since).sort(byTime).slice(-4);
+    if (xs.length < 3) continue;
+    const c = new Map(); for (const e of xs) c.set(e.end - e.start, (c.get(e.end - e.start) || 0) + 1);
+    const [len, n] = [...c].sort((a, b) => b[1] - a[1])[0];
+    if (n < 3 || len === t.end - t.start) continue;
+    tips.push({ key: `len|${t.id}|${len}`, kind: 'len', tplId: t.id, title: t.title, cat: t.cat, start: t.start, end: Math.min(t.start + len, 24 * 60 - 1), from: t.end - t.start, len,
+      why: `${faDigits(n)} جلسه از ۴ جلسهٔ آخر ${faDigits(len)} دقیقه بود، نه ${faDigits(t.end - t.start)} دقیقه.` });
+  }
+  // 3) A pattern row cancelled or moved the last three times.
+  for (const t of live) {
+    if (t.until) continue;
+    const xs = store.all('entry').filter(e => e.templateId === t.id && e.date <= today).sort(byTime).slice(-3);
+    if (xs.length < 3 || xs.some(isActive)) continue;
+    tips.push({ key: `end|${t.id}|${xs[2].date}`, kind: 'end', tplId: t.id, title: t.title, cat: t.cat, why: 'سه بار آخر لغو یا جابه‌جا شد.' });
+  }
+  const off = store.get('tips')?.dismissed || {};
+  return tips.filter(x => !off[x.key]);
+}
+
+export function learnedPresets(limit = 10, ctx = null) {
+  // What was actually done in the last three months (typed, imported or from the weekly pattern), recent weeks first.
+  const counts = new Map(), since = dayKey(addDays(new Date(), -90)), today = todayKey();
+  for (const e of store.all('entry')) {
+    if (e.groupId || e.movedFrom || !isActive(e) || e.date < since || e.date > today) continue;
     const c = counts.get(e.title) || { title: e.title, cat: e.cat, n: 0, fit: 0 };
-    c.n++;
+    c.n += ageWeight(e.date);
     if (ctx && fromDayKey(e.date).getDay() === ctx.weekday) c.fit += e.untimed || Math.abs(e.start - ctx.minute) <= 120 ? 1 : 0;
     counts.set(e.title, c);
   }

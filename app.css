@@ -553,3 +553,17 @@ input{font-family:inherit}
 .gp-hs.proj>b{background:none;box-shadow:0 0 0 1px var(--sage) inset;opacity:.75}
 .gp-hs.proj>span{opacity:.75}
 .hint.warn{color:var(--burg)}
+/* The one likely thing at this time, one tap */
+.guess{display:flex;align-items:center;gap:12px;width:100%;margin:6px 0 10px;padding:14px 16px;border:0;border-radius:18px;background:var(--sage-soft);color:var(--ink);text-align:right;font:inherit}
+.guess>span{flex:1;display:flex;flex-direction:column;gap:2px}
+.guess b{font-size:17px}
+.guess small{font-size:12.5px;color:var(--muted)}
+.guess em{font-style:normal;font-weight:700;color:var(--sage);font-size:14px}
+.guess .dot{width:12px;height:12px;border-radius:6px}
+.guess:active{transform:scale(.98)}
+/* Suggestions for the weekly pattern */
+.card.tips{display:flex;flex-direction:column;gap:10px;padding:16px 16px 18px;overflow:visible}
+.tip{display:flex;align-items:center;gap:10px;border-top:1px solid var(--sep);padding-top:10px}
+.tip p{flex:1;margin:0;font-size:14px;line-height:1.7}
+.tip small{display:block;color:var(--muted);font-size:12px}
+.tip>span{display:flex;gap:6px;flex-shrink:0}

@@ -7,7 +7,7 @@ import {
   weekStart, fmtTime, toMin, toNum, toHHMM, weekdayName, jDayMonth, jMonthYear, daysLabel,
   newEntry, logChange, liveStatus, isActive, byTime, entriesOn, ensureRange, applyTemplate,
   groups, seriesOf, sessionInfo, groupStatus, numberSessions, headcount, lastHeadcount, learnedPresets, isPaid, awaitingPayment,
-  minutesOf, timeLabel, timeRange, usualMinutes, seriesDone, refreshBills, monthStats, monthKeyOf, shiftPay, shiftRate, GORDAN_RE, gordan, gordanMonth, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
+  minutesOf, timeLabel, timeRange, usualMinutes, guessAt, patternTips, seriesDone, refreshBills, monthStats, monthKeyOf, shiftPay, shiftRate, GORDAN_RE, gordan, gordanMonth, priceRow, priceOf, sessionKind, money, invoiceOf, profile, headcountChoices,
 } from './model.js';
 
 const $ = s => document.querySelector(s);
@@ -84,11 +84,45 @@ function today() {
       <div style="display:flex;align-items:center;gap:10px"><span class="eyebrow" style="text-align:left">${items.length ? `${fa(items.length)} برنامه${nc ? `، ${fa(nc)} لغو` : ''}` : ''}</span>
       <button class="icon-btn" data-act="settings" aria-label="تنظیمات و همگام‌سازی">${GEAR}<i class="sync-dot ${sync.state.status}"></i></button></div></div>
     <div class="days">${strip}</div>
-    <div class="cols"><div class="main list stagger">${heroH}${isToday ? dayPath(items, now) : ''}${items.length ? items.map(e => itemHTML(e) + quickCount(e)).join('') : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامهٔ ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
+    <div class="cols"><div class="main list stagger">${heroH}${isToday ? dayPath(items, now) + tipsCard() : ''}${items.length ? items.map(e => itemHTML(e) + quickCount(e)).join('') : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامهٔ ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
       ${side ? `<aside class="side"><div class="eyebrow" style="margin-bottom:8px">فردا، ${weekdayName(addDays(now, 1))} ${jDayMonth(addDays(now, 1))}</div>
         <div class="list stagger" style="opacity:.85">${side.length ? side.map(e => itemHTML(e, true)).join('') : '<div class="card empty" style="padding:18px">هنوز چیزی نیست</div>'}</div></aside>` : ''}</div>`;
 }
 const fromJ = d => jDayMonth(d).split(' ')[0];
+
+// What the last four weeks suggest for the weekly pattern; nothing changes until «اعمال».
+function tipsCard() {
+  const tips = patternTips();
+  if (!tips.length) return '';
+  const say = x => x.kind === 'add' ? `«${esc(x.title)}»، ${WEEKDAYS[x.wd]}\u200cها ${fmtTime(x.start)} تا ${fmtTime(x.end)}، به الگو اضافه شود؟`
+    : x.kind === 'len' ? `«${esc(x.title)}» در الگو ${fa(x.len)} دقیقه شود؟ (${fmtTime(x.start)} تا ${fmtTime(x.end)})`
+    : `«${esc(x.title)}» از الگو برداشته شود؟`;
+  return `<div class="card tips"><div class="eyebrow">پیشنهاد برای الگوی هفته، از رفتار ۴ هفتهٔ اخیر</div>${tips.map(x => `<div class="tip"><p>${say(x)}<small>${x.why}</small></p>
+    <span><button class="chip small sel" data-tip="${esc(x.key)}">اعمال</button><button class="chip small" data-tipno="${esc(x.key)}">نه</button></span></div>`).join('')}</div>`;
+}
+async function applyTip(key) {
+  const x = patternTips().find(t => t.key === key);
+  if (!x) return;
+  if (x.kind === 'add') {
+    // Start after the last hand-made one, so no day gets the same session twice.
+    const from = dayKey(addDays(fromDayKey([x.after, todayKey()].sort().pop()), 1));
+    const tpl = { id: uid(), kind: 'template', days: [x.wd], start: x.start, end: x.end, title: x.title, cat: x.cat, groupId: x.groupId, from };
+    await store.put(tpl);
+    toast(`به الگو اضافه شد: ${x.title}، ${WEEKDAYS[x.wd]}\u200cها ${fmtTime(x.start)}`);
+  } else {
+    const tpl = store.get(x.tplId); if (!tpl) return;
+    const before = { end: tpl.end, until: tpl.until };
+    if (x.kind === 'len') tpl.end = x.end; else tpl.until = todayKey();
+    await store.put(tpl); await applyTemplate(tpl);
+    toast(x.kind === 'len' ? `${x.title}: از این به بعد ${fmtTime(x.start)} تا ${fmtTime(x.end)}` : `${x.title} از الگو برداشته شد`, async () => { Object.assign(tpl, before); await store.put(tpl); await applyTemplate(tpl); render(false); });
+  }
+  await render(false);
+}
+async function dismissTip(key) {
+  const p = store.get('tips') || { id: 'tips', kind: 'prefs', dismissed: {} };
+  p.dismissed = { ...p.dismissed, [key]: todayKey() };
+  await store.put(p); render(false);
+}
 
 // A finished shift asks for its headcount right in the list: one tap on the likely number.
 function quickCount(e) {
@@ -445,13 +479,18 @@ const SHEETS = {
     const start = s.start ?? (isToday ? Math.floor(m / 5) * 5 : 9 * 60);
     const end = s.end ?? Math.min(start + 60, END_OF_DAY);
     const gs = groups();
-    const presets = learnedPresets(12, { weekday: d.getDay(), minute: start, date: dayKey(d) });
-    const sug = presets.filter(p => p.suggested), rest = presets.filter(p => !p.suggested);
-    const chip = p => `<button class="chip ${p.suggested ? 'sug' : ''}" data-quick="${esc(p.title)}" data-cat="${p.cat}"><i class="dot" style="background:var(--c-${p.cat})"></i>${esc(p.title)}</button>`;
+    const guesses = guessAt(dayKey(d), start).filter(g => g.score >= 0.25).slice(0, 3), best = guesses[0]?.sure ? guesses[0] : null;
+    const guessed = new Set(guesses.map(g => g.title));
+    const rest = learnedPresets(12, { weekday: d.getDay(), minute: start, date: dayKey(d) }).filter(p => !guessed.has(p.title));
+    const pick = p => p.groupId ? `data-quickgroup="${p.groupId}"` : `data-quick="${esc(p.title)}" data-cat="${p.cat}"`;
+    const chip = p => `<button class="chip ${p.score ? 'sug' : ''}" ${pick(p)}><i class="dot" style="background:var(--c-${p.cat})"></i>${esc(p.title)}</button>`;
+    const sug = best ? guesses.slice(1) : guesses;
+    const len = best ? usualMinutes(best) : 0;
     return sheetHead('افزودن', `<span class="eyebrow">${isToday ? `الان ${fmtTime(m)}` : ''}</span>`) + `
       ${dayChips(s.dayOff)}
       ${timeInputs(start, end, s.end == null)}
-      ${sug.length ? `<div class="eyebrow">پیشنهاد برای ${s.dayOff === 0 ? 'امروز' : weekdayName(d)} در این ساعت (از ${weekdayName(d)}\u200cهای گذشته)</div><div class="chips">${sug.map(chip).join('')}</div>` : ''}
+      ${best ? `<button class="guess" ${pick(best)}><i class="dot" style="background:var(--c-${best.cat})"></i><span><b>${esc(best.title)}</b><small>${fmtTime(start)} تا ${fmtTime(Math.min(start + len, END_OF_DAY))}؛ ${fa(best.times)} ${weekdayName(d)} اخیر همین ساعت</small></span><em>ثبت</em></button>` : ''}
+      ${sug.length ? `<div class="eyebrow">${best ? 'یا' : `معمولاً ${weekdayName(d)}\u200cها حدود این ساعت`}</div><div class="chips">${sug.map(chip).join('')}</div>` : ''}
       <div class="eyebrow">یک لمس، ثبت</div>
       <div class="chips">${rest.map(chip).join('')}</div>
       ${gs.length ? `<div class="eyebrow">جلسهٔ مراجع (مثلاً جبرانی)</div><div class="chips">${gs.map(g => `<button class="chip" data-quickgroup="${g.id}"><i class="dot" style="background:var(--c-client)"></i>${esc(g.name)}</button>`).join('')}</div>` : ''}
@@ -511,10 +550,10 @@ const SHEETS = {
   },
 
   templates() {
-    const tpls = store.all('template').sort((a, b) => a.start - b.start || daysLabel(a.days).localeCompare(daysLabel(b.days), 'fa'));
+    const tpls = store.all('template').filter(t => !t.until || t.until >= todayKey()).sort((a, b) => a.start - b.start || daysLabel(a.days).localeCompare(daysLabel(b.days), 'fa'));
     const rows = WEEK_ORDER.map(dn => {
       const xs = tpls.filter(t => t.days.includes(dn));
-      return `<div class="tp-day"><b>${WEEKDAYS[dn]}</b>${xs.length ? xs.map(t => `<button class="tp-row" data-act="tpl" data-id="${t.id}"><i class="dot" style="background:var(--c-${t.cat})"></i><span class="tp-time">${fmtTime(t.start)}–${fmtTime(t.end)}</span><span>${esc(t.title)}</span>${t.headcount ? `<em>${fa(t.headcount)} نفر</em>` : ''}</button>`).join('') : '<span class="soft" style="font-size:13px">آزاد</span>'}</div>`;
+      return `<div class="tp-day"><b>${WEEKDAYS[dn]}</b>${xs.length ? xs.map(t => `<button class="tp-row" data-act="tpl" data-id="${t.id}"><i class="dot" style="background:var(--c-${t.cat})"></i><span class="tp-time">${fmtTime(t.start)}–${fmtTime(t.end)}</span><span>${esc(t.title)}${t.until ? `<small class="soft"> تا ${jDayMonth(fromDayKey(t.until))}</small>` : ''}</span>${t.headcount ? `<em>${fa(t.headcount)} نفر</em>` : ''}</button>`).join('') : '<span class="soft" style="font-size:13px">آزاد</span>'}</div>`;
     }).join('');
     return sheetHead('الگوی هفته', '<button class="pill-btn" data-act="tpl-new">+ ردیف</button>') +
       `<p class="hint">برنامهٔ ثابت را یک بار این‌جا وارد کن. هر ردیف می‌تواند چند روز داشته باشد (مثلاً زوج‌ها ۷:۳۰). از امروز به بعد هر هفته خودکار پر می‌شود؛ روزهای گذشته دست نمی‌خورند.</p>${rows}`;
@@ -534,7 +573,9 @@ const SHEETS = {
       <label class="fld">عنوان${draft.cat === 'client' ? ' (اگر خالی بماند، نام مراجع)' : ''}<input id="fTitle" value="${esc(t.title)}" placeholder="${draft.cat === 'shift' ? 'مثلاً گردان فرشته' : draft.cat === 'uni' ? 'مثلاً تفسیر قرآن' : ''}"></label>
       ${draft.cat === 'shift' ? `<label class="fld">تعداد معمول شاگردها (اختیاری)<input id="fHead" type="text" inputmode="numeric" autocomplete="off" value="${t.headcount != null ? fa(t.headcount) : ''}"></label>` : ''}
       <button class="wide-btn" data-act="save-tpl">ذخیره</button>
-      ${s.id ? '<button class="wide-btn danger" data-act="delete-tpl">حذف از الگو (از امروز به بعد)</button>' : ''}`;
+      ${s.id ? `<div class="eyebrow">${t.until ? `آخرین جلسه: ${jFull(t.until)}` : 'دورهٔ این کار تمام می‌شود؟ آخرین هفته را انتخاب کن'}</div>
+      <div class="chips">${[0, 1, 2, 3].map(w => { const k = lastInWeek(t, w); return k ? `<button class="chip small ${t.until === k ? 'sel' : ''}" data-until="${k}">${w === 0 ? 'همین هفته' : w === 1 ? 'هفتهٔ بعد' : `${fa(w)} هفتهٔ دیگر`}<span class="soft"> ${jDayMonth(fromDayKey(k))}</span></button>` : ''; }).join('')}${t.until ? '<button class="chip small" data-until="">بدون پایان</button>' : ''}</div>
+      <button class="wide-btn danger" data-act="delete-tpl">حذف از الگو (از امروز به بعد)</button>` : ''}`;
   },
 
   group(s) {
@@ -789,6 +830,13 @@ async function shareFile(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
+// The last day of a pattern row in the week `w` weeks from now (weeks start on Saturday).
+function lastInWeek(t, w) {
+  const s0 = addDays(weekStart(new Date()), w * 7);
+  let last = null;
+  for (let i = 0; i < 7; i++) { const d = addDays(s0, i), k = dayKey(d); if (t.days.includes(d.getDay()) && k >= todayKey() && k >= t.from) last = k; }
+  return last;
+}
 const sameDays = (a, b) => a.length === b.length && b.every(d => a.includes(d));
 
 function renderSheet() {
@@ -876,6 +924,8 @@ document.addEventListener('click', async ev => {
   const rm = t.closest('[data-rmode]'); if (rm) { state.reportMode = rm.dataset.rmode; state.reportOff = 0; render(); return; }
   const ro = t.closest('[data-roff]'); if (ro && !ro.disabled) { state.reportOff = Math.min(0, state.reportOff + +ro.dataset.roff); render(); return; }
   const open = t.closest('[data-open]'); if (open) { openSheet('item', { id: open.dataset.open }); return; }
+  const tip = t.closest('[data-tip]'); if (tip) { await applyTip(tip.dataset.tip); return; }
+  const tipNo = t.closest('[data-tipno]'); if (tipNo) { await dismissTip(tipNo.dataset.tipno); return; }
 
   const act = t.closest('[data-act]')?.dataset.act;
   if (act === 'settings') { openSheet('settings'); sync.run(); return; }
@@ -1043,6 +1093,14 @@ document.addEventListener('click', async ev => {
     const dt = t.closest('[data-dayt]'); if (dt) { keep(); const n = +dt.dataset.dayt; d.days = d.days.includes(n) ? d.days.filter(x => x !== n) : [...d.days, n]; renderSheet(); restore(); return; }
     const pc = t.closest('[data-pickcat]'); if (pc) { keep(); d.cat = pc.dataset.pickcat; renderSheet(); restore(); return; }
     const tg = t.closest('[data-tplgroup]'); if (tg) { keep(); d.groupId = tg.dataset.tplgroup; renderSheet(); restore(); return; }
+    const un = t.closest('[data-until]');
+    if (un && s.id) {
+      const tpl = store.get(s.id), before = tpl.until;
+      tpl.until = un.dataset.until || null; if (!tpl.until) delete tpl.until;
+      await store.put(tpl); await applyTemplate(tpl); await render(false); keep(); renderSheet(); restore();
+      toast(tpl.until ? `«${tpl.title}» بعد از ${jFull(tpl.until)} در برنامه نمی‌آید` : `«${tpl.title}» دوباره بی‌پایان شد`, async () => { tpl.until = before; await store.put(tpl); await applyTemplate(tpl); render(false); });
+      return;
+    }
     if (act === 'save-tpl') {
       if (!d.days.length) { toast('حداقل یک روز انتخاب کن'); return; }
       const g = d.cat === 'client' && d.groupId ? store.get(d.groupId) : null;
@@ -1131,7 +1189,12 @@ document.addEventListener('submit', async ev => {
 document.addEventListener('change', ev => {
   if (ev.target.id === 'importFile' && ev.target.files[0]) importFile(ev.target.files[0]);
 });
+let rerank;
 document.addEventListener('input', ev => {
+  if (ev.target.id === 'fStart' && state.sheet?.kind === 'add' && ev.target.value) {
+    clearTimeout(rerank);
+    rerank = setTimeout(() => { const s = state.sheet; if (s?.kind !== 'add') return; s.start = toMin($('#fStart').value); s.end = $('#fEnd').dataset.auto ? null : toMin($('#fEnd').value); renderSheet(); }, 350);
+  }
   if (ev.target.id === 'fEnd' && ev.target.dataset.auto && ev.target.value) { delete ev.target.dataset.auto; $('#autoHint')?.remove(); }
 });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeSheet(); });
