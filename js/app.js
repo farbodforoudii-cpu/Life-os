@@ -85,32 +85,26 @@ function today() {
       <div style="display:flex;align-items:center;gap:10px"><span class="eyebrow" style="text-align:left">${items.length ? `${fa(items.length)} برنامه${nc ? `، ${fa(nc)} لغو` : ''}` : ''}</span>
       <button class="icon-btn" data-act="settings" aria-label="تنظیمات و همگام‌سازی">${GEAR}<i class="sync-dot ${sync.state.status}"></i></button></div></div>
     <div class="days">${strip}</div>
-    <div class="cols"><div class="main list stagger">${heroH}${isToday ? dayPath(items, now) + tipsCard() : ''}${items.length || money.rows.length ? dayList(items, money) : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامهٔ ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
+    <div class="cols"><div class="main list stagger">${heroH}${isToday ? dayPath(items, now) + tipsCard() : ''}${items.length || money.guesses.length ? dayList(items, money) : empty(isToday ? 'امروز برنامه‌ای نیست' : 'برای این روز هنوز چیزی نیست', 'با + اضافه کن. برای برنامهٔ ثابت، از تب «هفته» ← «الگوی هفته» استفاده کن.')}</div>
       ${side ? `<aside class="side"><div class="eyebrow" style="margin-bottom:8px">فردا، ${weekdayName(addDays(now, 1))} ${jDayMonth(addDays(now, 1))}</div>
         <div class="list stagger" style="opacity:.85">${side.length ? side.map(e => itemHTML(e, true)).join('') : '<div class="card empty" style="padding:18px">هنوز چیزی نیست</div>'}</div></aside>` : ''}</div>`;
 }
 const fromJ = d => jDayMonth(d).split(' ')[0];
 
-// The day with its spending in between: a small marker for each purchase (amount on tap), and for purchases in a
-// gap a suggestion of what was probably done there.
+// Where the day went, read from purchases in «حساب من»: only the guess of what was done is shown (never amounts or
+// categories), as a faint row among the day's items, accepted with ✓ or set aside with ✕.
 const REL = { during: 'حین', after: 'بعد از', before: 'قبل از' };
 function dayList(items, money) {
-  const inGuess = new Set(money.guesses.flatMap(g => g.tx.map(r => r.id)));
-  const rows = [
+  return [
     ...items.map(e => ({ at: e.untimed ? -1 : e.start, html: itemHTML(e) + quickCount(e) })),
-    ...money.rows.filter(r => !inGuess.has(r.id)).map(r => ({ at: r.min + 0.5, html: moneyRow(r) })),
     ...money.guesses.map(g => ({ at: g.start + 0.5, html: guessRow(g) })),
-  ].sort((a, b) => a.at - b.at);
-  return rows.map(x => x.html).join('');
-}
-const amt = r => state.showAmt?.has(r.id) ? `<em>${short(r.amount)}</em>` : '<em class="soft">مبلغ</em>';
-function moneyRow(r) {
-  return `<button class="mrow" data-amt="${esc(r.id)}"><i class="mdot m-${r.cat}"></i><span class="mt">${fmtTime(r.min)}</span><span class="mx"><b>${r.label}</b>${r.near ? `<small>${REL[r.near.rel]} ${esc(r.near.e.title)}</small>` : ''}</span>${amt(r)}</button>`;
+  ].sort((a, b) => a.at - b.at).map(x => x.html).join('');
 }
 function guessRow(g) {
-  const r = g.tx[0], why = `${g.learned ? 'مثل دفعه‌های قبل، ' : ''}از خرج ${r.label}${r.desc ? ` («${esc(r.desc)}»)` : ''}${g.near ? `، ${REL[g.near.rel]} ${esc(g.near.e.title)}` : ''}`;
-  return `<div class="ghost"><div class="gh-top"><span class="mt">${fmtTime(g.start)}</span><b>${esc(g.title)}؟</b>${g.tx.map(r => `<button class="gh-amt" data-amt="${esc(r.id)}">${amt(r)}</button>`).join('')}</div><small>${why}</small>
-    <span class="gh-acts"><button class="chip small sel" data-gyes="${esc(g.key)}">ثبت</button><button class="chip small" data-gname="${esc(g.key)}">عنوان دیگر</button><button class="chip small" data-tipno="${esc(g.key)}">نه</button></span></div>`;
+  const place = g.tx.map(r => r.desc).find(Boolean);
+  const sub = ['احتمالاً', g.near && `${REL[g.near.rel]} ${esc(g.near.e.title)}`, place && esc(place)].filter(Boolean).join('، ');
+  return `<div class="ghost"><button class="gh-main" data-gname="${esc(g.key)}" aria-label="ثبت با عنوان دیگر"><span class="time">${fmtTime(g.start)}</span><span class="txt"><span class="title">${esc(g.title)}؟</span><span class="sub">${sub}</span></span></button>
+    <button class="gh-b yes" data-gyes="${esc(g.key)}" aria-label="درست است، ثبت شود">✓</button><button class="gh-b" data-tipno="${esc(g.key)}" aria-label="نه">✕</button></div>`;
 }
 async function acceptGuess(key, rename) {
   const g = dayMoney(dayKey(selDate()), sync.moneyTx()).guesses.find(x => x.key === key);
@@ -960,7 +954,6 @@ document.addEventListener('click', async ev => {
   const ro = t.closest('[data-roff]'); if (ro && !ro.disabled) { state.reportOff = Math.min(0, state.reportOff + +ro.dataset.roff); render(); return; }
   const open = t.closest('[data-open]'); if (open) { openSheet('item', { id: open.dataset.open }); return; }
   const tip = t.closest('[data-tip]'); if (tip) { await applyTip(tip.dataset.tip); return; }
-  const am = t.closest('[data-amt]'); if (am) { state.showAmt = state.showAmt || new Set(); const id = am.dataset.amt; state.showAmt.has(id) ? state.showAmt.delete(id) : state.showAmt.add(id); render(false); return; }
   const gy = t.closest('[data-gyes]'); if (gy) { await acceptGuess(gy.dataset.gyes, false); return; }
   const gn = t.closest('[data-gname]'); if (gn) { await acceptGuess(gn.dataset.gname, true); return; }
   const tipNo = t.closest('[data-tipno]'); if (tipNo) { await dismissTip(tipNo.dataset.tipno); return; }

@@ -23,7 +23,7 @@ for (const scheme of SHOTS ? ['light', 'dark'] : ['light']) {
   await p.goto(URL); await p.waitForTimeout(500);
   await p.evaluate(async ([its, mirror]) => new Promise(res => { const r = indexedDB.open('life-os', 2); r.onsuccess = () => { const tx = r.result.transaction(['items', 'kv'], 'readwrite'); for (const it of its) tx.objectStore('items').put(it); tx.objectStore('kv').put('AAAAA-BBBBB-CCCCC-DDDDD-EEEEE', 'syncKey'); tx.objectStore('kv').put(mirror, 'moneyMirror'); tx.oncomplete = res; }; }), [items, mirror]);
   await p.reload(); await p.waitForTimeout(900);
-  if (SHOTS) { await p.click('[data-amt="x2"]'); await p.waitForTimeout(200); await p.evaluate(() => document.querySelector('.mrow')?.scrollIntoView({ block: 'start' })); await p.screenshot({ path: `${SHOTS}/money_day_${scheme}.png`, fullPage: true }); }
+  if (SHOTS) { await p.evaluate(() => document.querySelector('.ghost')?.scrollIntoView({ block: 'start' })); await p.evaluate(() => scrollBy(0, -260)); await p.waitForTimeout(400); await p.screenshot({ path: `${SHOTS}/money_day_${scheme}.png` }); }
   if (scheme === 'light') {
     const r = await p.evaluate(async k => {
       const m = await import('./js/model.js'), { sync } = await import('./js/sync.js');
@@ -32,7 +32,8 @@ for (const scheme of SHOTS ? ['light', 'dark'] : ['light']) {
     }, k);
     check('placed', r.rows, ['x1:after شیفت نمونه', 'x2:during مراجع نمونه', 'x3:-', 'x4:-', 'x5:-']);
     check('gaps', r.guesses, ['صبحانه:x1', 'بنزین و ماشین:x3+x4', 'شام:x5']);
-    if (!SHOTS) check('amounts hidden', await p.$$eval('.mrow em, .ghost em', xs => xs.every(x => x.textContent === 'مبلغ')), true);
+    check('no money shown', await p.evaluate(() => { const t = document.querySelector('#app').innerText; return /هزار|میلیون|تومان|غذا|کافه نمونه/.test(t.replace(/کافه نمونه/g, 'PLACE')) || document.querySelectorAll('.mrow').length > 0; }), false);
+    check('guess rows', await p.$$eval('.ghost .title', xs => xs.map(x => x.textContent)), ['صبحانه؟', 'بنزین و ماشین؟', 'شام؟']);
     await p.click('[data-gyes="tx|x1"]'); await p.waitForTimeout(400);
     const after = await p.evaluate(async k => {
       const m = await import('./js/model.js'), { sync } = await import('./js/sync.js'), { store } = await import('./js/store.js');
