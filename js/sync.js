@@ -1,12 +1,17 @@
 // Two-way sync with the ecosystem's Supabase project, joined by a sync code (no accounts).
 // Each record is stored whole as JSON; the newest updatedAt wins on both sides.
-// The space is shared with hesab-man (app = 'hesab'); this app only reads its own rows.
+// The space is shared with hesab-man (app = 'hesab'). Its transactions are only read here (never written), kept apart
+// from this app's records, so the day can show where money went next to what was done.
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { db } from './db.js';
 import { store } from './store.js';
 
 const APP = 'life';
 const state = { key: null, status: 'off', error: '', lastSync: null, cursor: null, busy: false };
+// «حساب من» transactions, by id: only what the day view needs.
+let money = { cursor: null, tx: {} };
+const moneyListeners = new Set();
+const TX_KEYS = ['ts', 'amount', 'dir', 'type', 'cat', 'desc', 'cp'];
 const listeners = new Set();
 const emit = () => { for (const fn of listeners) fn(state); };
 const set = patch => { Object.assign(state, patch); emit(); };
@@ -42,14 +47,35 @@ const PERSIAN_ERRORS = [
 ];
 const persian = e => (PERSIAN_ERRORS.find(([re]) => re.test(e.message)) || [0, e.message])[1];
 
+async function pullMoney() {
+  let more = true, changed = false;
+  while (more) {
+    const rows = await rpc('eco_pull', { p_key: state.key, p_app: 'hesab', p_after: money.cursor, p_limit: 500 });
+    for (const { data: d } of rows) {
+      if (d.kind !== 'tx') continue;
+      const v = d.value || {}, id = d.key || d.id;
+      if (d.deleted || v.deleted || v.status === 'deleted') delete money.tx[id];
+      else money.tx[id] = Object.fromEntries(TX_KEYS.map(k => [k, v[k] ?? null]).concat([['id', id]]));
+      changed = true;
+    }
+    if (rows.length) money.cursor = rows[rows.length - 1].server_updated_at;
+    more = rows.length === 500;
+  }
+  if (changed) { await db.set('moneyMirror', money); for (const fn of moneyListeners) fn(); }
+}
+
 export const sync = {
   state,
+  // Transactions recorded in «حساب من», read-only.
+  moneyTx: () => Object.values(money.tx),
+  onMoney: fn => moneyListeners.add(fn),
   onChange: fn => listeners.add(fn),
 
   async init() {
     state.key = (await db.get('syncKey')) || null;
     state.cursor = (await db.get('syncCursor')) || null;
     state.lastSync = (await db.get('lastSync')) || null;
+    money = { cursor: null, tx: {}, ...((await db.get('moneyMirror')) || {}) };
     set({ status: state.key ? 'idle' : 'off' });
   },
 
@@ -82,6 +108,7 @@ export const sync = {
   // Switching off keeps the data on this device; it just stops travelling.
   async signOut() {
     state.key = null;
+    money = { cursor: null, tx: {} }; await db.set('moneyMirror', money);
     await db.set('syncKey', null);
     await db.set('syncCursor', null);
     set({ status: 'off', error: '', cursor: null });
@@ -104,6 +131,7 @@ export const sync = {
         }
         more = rows.length === 500;
       }
+      await pullMoney();
       const out = store.dirtyItems();
       for (let i = 0; i < out.length; i += 200) {
         const chunk = out.slice(i, i + 200);

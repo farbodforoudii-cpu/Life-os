@@ -526,3 +526,55 @@ export function learnedPresets(limit = 10, ctx = null) {
   const seen = new Set(learned.map(p => p.title));
   return [...learned, ...DEFAULT_PRESETS.filter(p => !seen.has(p.title))].slice(0, limit);
 }
+
+// ---------- the day, read from money ----------
+// Spending recorded in «حساب من» has a time but no place. Placed next to what was done that day it says roughly where
+// the day went: during a session, right after one, or in a gap that was never written down. Gaps become suggestions
+// only; nothing is added until the user taps «ثبت».
+export const MONEY_CATS = { food: 'غذا', personal: 'شخصی', home: 'خانه', car: 'ماشین و رفت‌وآمد', weekend: 'تفریح و سفر', health: 'سلامت و ورزش', education: 'آموزش', gift: 'هدیه', other: 'سایر' };
+// Not events of the day (subscriptions, bank fees) or not for this screen.
+const MONEY_SKIP = new Set(['digital', 'fees', 'habits']);
+const mealAt = m => m < 11 * 60 ? 'صبحانه' : m < 16 * 60 ? 'ناهار' : m < 19 * 60 ? 'کافه' : 'شام';
+const CAT_GUESS = { car: 'بنزین و ماشین', home: 'خرید خانه', personal: 'خرید شخصی', health: 'سلامت', weekend: 'تفریح', gift: 'خرید هدیه', education: 'آموزش', other: 'خرید' };
+const normDesc = s => String(s || '').replace(/[‌\s]+/g, ' ').trim();
+export const learnedTitle = desc => (store.get('moneyLearn')?.byDesc || {})[normDesc(desc)] || null;
+export async function learnTitle(desc, title) {
+  const k = normDesc(desc); if (!k) return;
+  const p = store.get('moneyLearn') || { id: 'moneyLearn', kind: 'prefs', byDesc: {} };
+  p.byDesc = { ...p.byDesc, [k]: title };
+  await store.put(p);
+}
+
+export function dayMoney(k, txs) {
+  const items = entriesOn(k).filter(e => isActive(e) && !e.untimed && !e.fromTx);
+  const used = new Set(store.all('entry').flatMap(e => e.fromTx || []));
+  const off = store.get('tips')?.dismissed || {};
+  const rows = [];
+  for (const t of txs) {
+    if (!t.ts || t.dir !== 'out' || t.type !== 'expense' || MONEY_SKIP.has(t.cat)) continue;
+    const d = new Date(t.ts);
+    if (dayKey(d) !== k) continue;
+    const min = d.getHours() * 60 + d.getMinutes();
+    // Where it sits: during a session, just after (≤45 min), or just before (≤30 min).
+    let near = null;
+    for (const e of items) {
+      const rel = min >= e.start && min <= e.end ? 'during' : min > e.end && min - e.end <= 45 ? 'after' : min < e.start && e.start - min <= 30 ? 'before' : null;
+      if (!rel) continue;
+      const gap = rel === 'during' ? 0 : rel === 'after' ? min - e.end : e.start - min;
+      if (!near || gap < near.gap) near = { e, rel, gap };
+    }
+    rows.push({ id: t.id, min, amount: t.amount, cat: t.cat || 'other', label: MONEY_CATS[t.cat] || 'خرج', desc: t.desc || t.cp || '', near, used: used.has(t.id) });
+  }
+  rows.sort((a, b) => a.min - b.min);
+  // Gaps: what was probably done, from what was bought and when. Purchases within 20 minutes count as one stop.
+  const guesses = [];
+  for (const r of rows) {
+    if (r.used || (r.near && r.near.rel === 'during') || off[`tx|${r.id}`]) continue;
+    const last = guesses[guesses.length - 1];
+    if (last && r.min - last.lastMin <= 20) { last.tx.push(r); last.lastMin = r.min; continue; }
+    const title = learnedTitle(r.desc) || (r.cat === 'food' ? mealAt(r.min) : CAT_GUESS[r.cat] || 'خرید');
+    guesses.push({ key: `tx|${r.id}`, title, start: r.min, lastMin: r.min, tx: [r], learned: !!learnedTitle(r.desc), near: r.near });
+  }
+  for (const g of guesses) g.end = Math.min(Math.max(g.lastMin, g.start) + 30, 24 * 60 - 1);
+  return { rows, guesses };
+}
