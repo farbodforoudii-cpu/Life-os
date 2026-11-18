@@ -262,7 +262,7 @@ export const profile = () => store.get('profile') || { id: 'profile', kind: 'pro
 // there only when the user confirms; the answer comes back as a payment record (`pay_<package id>`, written by
 // «حساب من») and marks the package paid here. Only this app writes bills and packages, only «حساب من» writes
 // payments, so the two never overwrite each other.
-const BILL_KEYS = ['groupId', 'name', 'total', 'count', 'missing', 'from', 'to', 'period', 'paid'];
+const BILL_KEYS = ['groupId', 'name', 'total', 'count', 'missing', 'from', 'to', 'period', 'paid', 'ahead'];
 const periodOf = rows => {
   const ms = [...new Set(rows.map(r => jMonthYear(fromDayKey(r.e.date))))];
   return ms.length > 1 ? `${ms[0].split(' ')[0]}–${ms[ms.length - 1]}` : ms[0] || '';
@@ -383,10 +383,21 @@ export async function refreshBills(now = new Date()) {
     const bills = [];
     for (const s of store.all('series')) {
       const g = store.get(s.groupId), id = `bill_${s.id}`, old = store.get(id);
-      if (!g || (!old && (s.paid || !seriesDone(s, now)))) continue;
-      const v = invoiceOf(s.id);
-      const want = { groupId: g.id, name: g.name, total: v.total, count: v.rows.length, missing: v.missing,
-        from: v.rows[0]?.e.date || s.start, to: v.rows[v.rows.length - 1]?.e.date || s.start, period: periodOf(v.rows), paid: !!s.paid };
+      // Paid here before the package ended (paid in advance): «حساب من» must hear of it too, with the whole
+      // package's value (planned sessions included), so it can link the deposit or record the income.
+      const ahead = s.paid && s.paidVia !== 'hesab' && !seriesDone(s, now);
+      if (!g || (!old && !ahead && (s.paid || !seriesDone(s, now)))) continue;
+      const v = invoiceOf(s.id, { project: ahead || (!!old && old.ahead && !seriesDone(s, now)) });
+      // Paid ahead with sessions not yet planned: the rest of the package at today's price for the group's size.
+      let total = v.total, count = v.rows.length;
+      if (ahead) {
+        const left = Math.max(0, s.size - (s.offset || 0) - v.rows.length), row = priceRow(g, todayKey()), n = (g.members || []).length;
+        const each = row && row.by[n] != null ? row.by[n] : null;
+        if (left && each != null) { total += left * each; count += left; }
+      }
+      const want = { groupId: g.id, name: g.name, total, count, missing: v.missing,
+        from: v.rows[0]?.e.date || s.start, to: v.rows[v.rows.length - 1]?.e.date || s.start, period: periodOf(v.rows), paid: !!s.paid,
+        ahead: ahead || (!!old?.ahead && !seriesDone(s, now)) };
       if (old && BILL_KEYS.every(k => old[k] === want[k])) continue;
       bills.push({ ...(old || { id, kind: 'bill', seriesId: s.id, issuedAt: now.toISOString() }), ...want });
     }
