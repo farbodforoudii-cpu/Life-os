@@ -362,8 +362,29 @@ function monthRows(now) {
     rows.push({ ...(old || { id, kind: 'monthsum', month: k }), ...m });
   }
   const open = awaitingPayment(now), st = { open: open.reduce((s, e) => s + (priceOf(e) || 0), 0), openSessions: open.length };
-  const old = store.get('life_status');
-  if (!old || old.open !== st.open || old.openSessions !== st.openSessions) rows.push({ ...(old || { id: 'life_status', kind: 'lifestatus' }), ...st });
+  // For «حساب من»: what each client owes (held, unpaid sessions) and which packages are about to need renewing,
+  // with the next package's value at today's price for the group's size.
+  const by = new Map();
+  for (const e of open) {
+    const g = e.groupId && store.get(e.groupId);
+    if (!g) continue;
+    const x = by.get(g.id) || { g: g.id, name: g.name, n: 0, amount: 0, since: e.date };
+    x.n++; x.amount += priceOf(e) || 0; if (e.date < x.since) x.since = e.date;
+    by.set(g.id, x);
+  }
+  st.byGroup = [...by.values()].sort((a, b) => b.amount - a.amount);
+  st.renew = groups().map(g => {
+    const gs = groupStatus(g.id, now), cur = gs.current;
+    if (!cur || gs.left > 1) return null;
+    // Only clients still coming: a session in the last 3 weeks or one planned.
+    const recent = gs.next || (gs.last && gs.last.date >= dayKey(addDays(now, -21)));
+    if (!recent) return null;
+    const row = priceRow(g, todayKey()), each = row && row.by[(g.members || []).length];
+    return { g: g.id, name: g.name, left: Math.max(0, gs.left), size: cur.size, next: each != null ? each * cur.size : null };
+  }).filter(Boolean);
+  const old = store.get('life_status'), same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  if (!old || old.open !== st.open || old.openSessions !== st.openSessions || !same(old.byGroup, st.byGroup) || !same(old.renew, st.renew))
+    rows.push({ ...(old || { id: 'life_status', kind: 'lifestatus' }), ...st });
   return rows;
 }
 
