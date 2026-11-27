@@ -1,5 +1,5 @@
 // Domain model: entries, weekly templates, client groups and their packages (series).
-import { toJalali, MONTHS, WEEKDAYS, faDigits, monthRange } from './jalali.js';
+import { toJalali, MONTHS, WEEKDAYS, faDigits, monthRange, shiftMonth } from './jalali.js';
 import { store } from './store.js';
 
 export const CATS = {
@@ -271,7 +271,7 @@ const periodOf = rows => {
 // Each app publishes a summary of its own month: this one `month_<YYYY-MM>` (hours, sessions, value of the sessions
 // held), «حساب من» `money_<YYYY-MM>` (work income received). Both apps show the same card from the two.
 export const monthKeyOf = k => { const j = toJalali(fromDayKey(k)); return `${j.jy}-${String(j.jm).padStart(2, '0')}`; };
-const MONTH_KEYS = ['workMin', 'clientMin', 'shiftMin', 'estMin', 'sessions', 'shifts', 'earned', 'unpriced', 'shiftEarned',
+const MONTH_KEYS = ['workMin', 'clientMin', 'shiftMin', 'estMin', 'sessions', 'shifts', 'earned', 'unpriced', 'shiftEarned', 'uniMin', 'personalMin',
   'fcValue', 'fcSessions', 'fcShifts', 'fcPlanned', 'fcUnpriced', 'fcShiftsUnpriced'];
 
 // Gordan pays per student: each attendee of a Gordan shift counts at an average share (180,000 by default, editable),
@@ -345,8 +345,21 @@ export function monthStats(now = new Date()) {
     const k = monthKeyOf(e.date), m = out[k] || (out[k] = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0, shiftEarned: 0 });
     const min = minutesOf(e);
     m.workMin += min; if (e.estimated) m.estMin += min;
-    if (e.cat === 'client') { m.clientMin += min; m.sessions++; const p = priceOf(e); if (p == null) m.unpriced++; else m.earned += p; }
-    else { m.shiftMin += min; m.shifts++; m.shiftEarned += shiftIncome(e.title, e.headcount ?? null) || 0; }
+    let v = null;
+    if (e.cat === 'client') { m.clientMin += min; m.sessions++; v = priceOf(e); if (v == null) m.unpriced++; else m.earned += v; }
+    else { m.shiftMin += min; m.shifts++; v = shiftIncome(e.title, e.headcount ?? null); m.shiftEarned += v || 0; }
+    // Per source (a client group, a shift place): minutes, value and how many of its blocks had no price.
+    const g = e.groupId && store.get(e.groupId), name = g ? g.name : e.title || CATS[e.cat];
+    const src = m.src || (m.src = {}), x = src[name] || (src[name] = { cat: e.cat, min: 0, value: 0, n: 0, unpriced: 0 });
+    x.min += min; x.n++; if (v == null) x.unpriced++; else x.value += v;
+  }
+  // Time with no income, for the same picture: classes and personal blocks held (minutes).
+  for (const e of store.all('entry')) {
+    if (!isActive(e) || (e.cat !== 'uni' && e.cat !== 'personal') || e.untimed) continue;
+    const st = liveStatus(e, now);
+    if (st !== 'done' && st !== 'now') continue;
+    const m = out[monthKeyOf(e.date)];
+    if (m) m[e.cat === 'uni' ? 'uniMin' : 'personalMin'] = (m[e.cat === 'uni' ? 'uniMin' : 'personalMin'] || 0) + minutesOf(e);
   }
   // The running month also carries its forecast: held so far + planned for the rest.
   const cur = monthKeyOf(dayKey(now)), m = out[cur] || (out[cur] = { workMin: 0, clientMin: 0, shiftMin: 0, estMin: 0, sessions: 0, shifts: 0, earned: 0, unpriced: 0, shiftEarned: 0 });
@@ -354,11 +367,92 @@ export function monthStats(now = new Date()) {
   Object.assign(m, { fcPlanned: fc.planned, fcValue: m.earned + m.shiftEarned + fc.planned, fcSessions: fc.sessions, fcShifts: fc.shifts, fcUnpriced: fc.unpriced, fcShiftsUnpriced: fc.shiftsUnpriced });
   return out;
 }
+// ---------- money ahead, for «حساب من» ----------
+// When this month's work turns into money, from whom and how much, up to the end of the running month.
+//  A client pays a package on the day of its last session (every bill so far was paid that day or the next),
+//  or on its first session when the last package was paid ahead.
+//  After the current package, the weekly pattern continues: packages of the same size, priced from the group's
+//  list for its members, until the month ends.
+//  Gordan pays a month's students around the 18th of the next month (students × average share).
+export const GORDAN_DAY = 18;
+export function cashPlan(now = new Date()) {
+  const today = dayKey(now), k = monthKeyOf(today), { start, end } = monthRange(k), stop = dayKey(end);
+  const items = [];
+  for (const g of groups()) {
+    const tpls = store.all('template').filter(t => t.groupId === g.id && !t.deleted && t.cat === 'client');
+    const ser = seriesOf(g.id), nums = numberSessions(g.id);
+    if (!ser.length) continue;
+    const last = ser[ser.length - 1];
+    const paidAhead = s => { const b = store.get(`bill_${s.id}`); return !!(b && b.ahead); };
+    const habitAhead = [...ser].reverse().filter(s => s.paid).slice(0, 1).some(paidAhead);
+    let lastEnd = null;
+    for (const s of ser) {
+      const v = invoiceOf(s.id, { project: true });
+      if (!v || !v.rows.length) continue;
+      const to = v.rows[v.rows.length - 1].e.date;
+      if (s === last) lastEnd = v.unplanned ? null : to;
+      if (s.paid) continue;
+      const left = v.rows.filter(r => !r.done).length, late = !left && !v.unplanned;
+      let total = v.total, count = v.rows.length;
+      const row = priceRow(g, today), each = row && row.by[(g.members || []).length];
+      if (v.unplanned && each != null) { total += v.unplanned * each; count += v.unplanned; }
+      const date = late ? today : v.unplanned ? null : to;
+      if (date && date >= stop) continue;
+      items.push({ date, name: g.name, g: g.id, amount: total, type: 'package', sessions: count, left: left + v.unplanned, late, missing: v.missing });
+    }
+    // The pattern after the current package: next packages of the same size, until the month ends.
+    if (!lastEnd || !tpls.length || lastEnd >= stop) continue;
+    let n = 0, sum = 0, first = null, firstLeft = 0;
+    const size = last.size;
+    for (let d = addDays(fromDayKey(lastEnd), 1); dayKey(d) < stop; d = addDays(d, 1)) {
+      const key = dayKey(d);
+      const day = [];
+      for (const e of sessionsOf(g.id)) if (e.date === key && nums.get(e.id) === null) day.push(e);
+      for (const tpl of tpls) if (tplCovers(tpl, key, d) && !store.raw(tplEntryId(tpl, key))) day.push(fromTemplate(tpl, key));
+      for (const e of day) {
+        if (!n) { first = key; firstLeft = 0; }
+        n++; sum += priceOf(e) || 0;
+        if (liveStatus(e, now) !== 'done') firstLeft++;
+        if (habitAhead && n === 1) {
+          const row = priceRow(g, key), each = row && row.by[(g.members || []).length];
+          if (each != null) items.push({ date: key < today ? today : key, name: g.name, g: g.id, amount: each * size, type: 'renew', sessions: size, ahead: true, late: key < today });
+        }
+        if (n === size) {
+          if (!habitAhead) items.push({ date: key < today ? today : key, name: g.name, g: g.id, amount: sum, type: 'renew', sessions: size, left: firstLeft, from: first, late: key < today });
+          n = 0; sum = 0;
+        }
+      }
+    }
+  }
+  // Gordan: last month's students, paid around the 18th of this month (once written down in «گردان», it is done).
+  const prev = shiftMonth(k, -1), G = gordan();
+  if (G.paid[prev] == null) {
+    const gm = gordanMonth(prev, now), heads = gm.est;
+    if (heads) {
+      const due = dayKey(addDays(start, GORDAN_DAY - 1));
+      items.push({ date: due < today ? today : due, name: 'گردان', amount: Math.round(heads * G.perHead), type: 'gordan', heads, counted: gm.total || gm.counted === gm.shifts, month: prev, late: due < today });
+    }
+  }
+  // This month's Gordan students, for the next month (shown apart: it is not this month's cash).
+  const gc = gordanMonth(k, now);
+  const later = [];
+  const gPlanned = store.all('template').filter(t => t.cat === 'shift' && GORDAN_RE.test(t.title) && !t.deleted);
+  let headsAhead = 0;
+  for (let d = addDays(fromDayKey(today), 1); dayKey(d) < stop; d = addDays(d, 1)) {
+    const key = dayKey(d);
+    for (const tpl of gPlanned) if (tplCovers(tpl, key, d) && !store.raw(tplEntryId(tpl, key))) headsAhead += usualShiftHeads(tpl.title) || 0;
+  }
+  const gEst = Math.round(gc.est + headsAhead);
+  if (gEst) later.push({ date: dayKey(addDays(monthRange(shiftMonth(k, 1)).start, GORDAN_DAY - 1)), name: 'گردان', amount: Math.round(gEst * G.perHead), type: 'gordan', heads: gEst, month: k });
+  items.sort((a, b) => (a.date || '9').localeCompare(b.date || '9') || b.amount - a.amount);
+  return { month: k, at: today, items, later, perHead: G.perHead };
+}
+
 function monthRows(now) {
   const rows = [];
   for (const [k, m] of Object.entries(monthStats(now))) {
     const id = `month_${k}`, old = store.get(id);
-    if (old && MONTH_KEYS.every(f => old[f] === m[f])) continue;
+    if (old && MONTH_KEYS.every(f => old[f] === m[f]) && JSON.stringify(old.src ?? null) === JSON.stringify(m.src ?? null)) continue;
     rows.push({ ...(old || { id, kind: 'monthsum', month: k }), ...m });
   }
   const open = awaitingPayment(now), st = { open: open.reduce((s, e) => s + (priceOf(e) || 0), 0), openSessions: open.length };
@@ -383,6 +477,9 @@ function monthRows(now) {
     return { g: g.id, name: g.name, left: Math.max(0, gs.left), size: cur.size, next: each != null ? each * cur.size : null };
   }).filter(Boolean);
   const old = store.get('life_status'), same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const plan = cashPlan(now), oldPlan = store.get('life_plan');
+  if (!oldPlan || !same(oldPlan.items, plan.items) || oldPlan.month !== plan.month || !same(oldPlan.later, plan.later))
+    rows.push({ ...(oldPlan || { id: 'life_plan', kind: 'lifeplan' }), ...plan });
   if (!old || old.open !== st.open || old.openSessions !== st.openSessions || !same(old.byGroup, st.byGroup) || !same(old.renew, st.renew))
     rows.push({ ...(old || { id: 'life_status', kind: 'lifestatus' }), ...st });
   return rows;
