@@ -13,7 +13,7 @@ import {
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fa = faDigits;
-const state = { tab: 0, dayOff: 0, weekOff: 0, reportMode: 'month', reportOff: 0, lastNew: null, sheet: null };
+const state = { tab: 0, dayOff: 0, weekOff: 0, mwOpen: new Set(), reportMode: 'month', reportOff: 0, lastNew: null, sheet: null };
 const TABS = ['امروز', 'هفته', 'مراجع‌ها', 'گزارش'];
 const ICONS = [
   '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -208,7 +208,7 @@ function week() {
     return `<button class="mw-row ${isT ? 'today' : ''}" data-mw="${ri}"><span class="mw-day"><b>${weekdayName(d)}</b><span>${jDayMonth(d)}</span></span>
       <span class="mw-track">${items.map(e => `<i class="mw-seg" style="right:${pct(e.start)}%;width:calc(${pct(e.end) - pct(e.start)}% - 2px);background:var(--c-${e.cat});${isActive(e) ? (e.untimed ? 'opacity:.45;' : '') : 'opacity:.25;'}animation-delay:${ri * 50}ms"></i>`).join('')}${isT ? `<i class="nowline" style="right:${pct(m)}%"></i>` : ''}</span>
       <span class="mw-n">${items.length ? fa(items.length) : 'آزاد'}</span></button>
-      <div class="mw-open" data-mwopen="${ri}"><div>${items.map(e => `<button class="mw-li ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><i class="dot" style="background:var(--c-${e.cat})"></i><b>${timeLabel(e)}</b><span>${esc(e.title)}</span></button>`).join('')}<div style="height:6px"></div></div></div>`;
+      <div class="mw-open ${state.mwOpen.has(k) ? 'on' : ''}" data-mwopen="${ri}" data-mwk="${k}"><div>${items.map(e => `<button class="mw-li ${isActive(e) ? '' : 'cancelled'}" data-open="${e.id}"><i class="dot" style="background:var(--c-${e.cat})"></i><b>${timeLabel(e)}</b><span>${esc(e.title)}</span></button>`).join('')}<div style="height:6px"></div></div></div>`;
   }).join('');
 
   return `<div class="head"><div><div class="eyebrow">${jDayMonth(days[0])} تا ${jDayMonth(days[6])}</div><h1 class="big">${label}</h1></div>
@@ -408,6 +408,7 @@ function report() {
 const SCREENS = [today, week, clients, report];
 
 // ---------- render ----------
+let lastHTML = '', lastTab = -1;
 async function render(animate = true) {
   // Template sessions are created on demand for whatever range the screens show.
   const now = new Date();
@@ -416,7 +417,13 @@ async function render(animate = true) {
   const to = [dayKey(addDays(now, 8)), dayKey(addDays(ws, 6))].sort()[1];
   await ensureRange(from, to);
   const app = $('#app');
-  app.innerHTML = `<div class="${animate ? 'scr' : ''}">${SCREENS[state.tab]()}</div>`;
+  const html = SCREENS[state.tab]();
+  // Background redraws (clock, sync, store) must be invisible: nothing changed → touch nothing.
+  if (!animate && html === lastHTML && lastTab === state.tab) return;
+  const y = scrollY;
+  app.innerHTML = `<div class="${animate ? 'scr' : 'calm'}">${html}</div>`;
+  lastHTML = html; lastTab = state.tab;
+  if (!animate && scrollY !== y) scrollTo(0, y);
   $('#fab').hidden = state.tab > 1;
   document.querySelectorAll('.tab').forEach((b, i) => b.classList.toggle('on', i === state.tab));
   movePill();
@@ -949,7 +956,7 @@ document.addEventListener('click', async ev => {
 
   const day = t.closest('[data-day]'); if (day) { state.dayOff = +day.dataset.day; render(); return; }
   const wk = t.closest('[data-wk]'); if (wk) { const d = +wk.dataset.wk; state.weekOff = d === 0 ? 0 : state.weekOff + d; render(); return; }
-  const mw = t.closest('[data-mw]'); if (mw) { document.querySelector(`[data-mwopen="${mw.dataset.mw}"]`).classList.toggle('on'); return; }
+  const mw = t.closest('[data-mw]'); if (mw) { const o = document.querySelector(`[data-mwopen="${mw.dataset.mw}"]`); const on = o.classList.toggle('on'); state.mwOpen[on ? 'add' : 'delete'](o.dataset.mwk); return; }
   const rm = t.closest('[data-rmode]'); if (rm) { state.reportMode = rm.dataset.rmode; state.reportOff = 0; render(); return; }
   const ro = t.closest('[data-roff]'); if (ro && !ro.disabled) { state.reportOff = Math.min(0, state.reportOff + +ro.dataset.roff); render(); return; }
   const open = t.closest('[data-open]'); if (open) { openSheet('item', { id: open.dataset.open }); return; }

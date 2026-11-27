@@ -1,5 +1,6 @@
 // Offline-first service worker: app shell is cached; bump VERSION on every release.
-const VERSION = 'v32';
+// Every app on this site shares one Cache Storage: each app only ever touches caches with its own prefix.
+const PREFIX = 'lifeos-', VERSION = PREFIX + 'v33', LEGACY = ['v32'];
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/store.js', 'js/model.js', 'js/sync.js', 'js/config.js', 'js/jalali.js',
@@ -13,7 +14,7 @@ self.addEventListener('install', e => {
 });
 
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION && (k.startsWith(PREFIX) || LEGACY.includes(k))).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
