@@ -577,3 +577,5 @@ input{font-family:inherit}
 .gh-b{width:34px;height:34px;border-radius:17px;border:0;background:var(--fill);color:var(--muted);font-size:15px;flex-shrink:0}
 .gh-b.yes{background:var(--sage-soft);color:var(--sage);font-weight:700}
 .gh-b:active,.gh-main:active{transform:scale(.96)}
+/* Background redraws (sync, clock) replace the screen silently: no entrance animations replayed. */
+.calm *:not(.pulse):not(.dp-ring):not(.sync-dot){animation:none!important}
