@@ -310,7 +310,7 @@ input{font-family:inherit}
 @keyframes dpRing{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(2.2)}}
 .scr .dp-node{animation:dpPop .5s var(--spring) calc(var(--d) + .15s) both}
 .scr .dp-tick{animation:dpTick .35s ease calc(var(--d) + .45s) both}
-@keyframes dpPop{from{transform:scale(0)}}
+@keyframes dpPop{from{transform:scale(.5);opacity:0}}
 @keyframes dpTick{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
 .dp-now circle{fill:var(--sage);stroke:var(--card);stroke-width:2}
 .scr .dp-now{animation:fadeIn .3s ease calc(var(--d) + .15s) both}
