@@ -391,7 +391,7 @@ export function cashPlan(now = new Date()) {
       if (!v || !v.rows.length) continue;
       const to = v.rows[v.rows.length - 1].e.date;
       if (s === last) lastEnd = v.unplanned ? null : to;
-      if (s.paid) continue;
+      if (s.paid || to < LINKED_FROM) continue;
       const left = v.rows.filter(r => !r.done).length, late = !left && !v.unplanned;
       let total = v.total, count = v.rows.length;
       const row = priceRow(g, today), each = row && row.by[(g.members || []).length];
@@ -448,6 +448,7 @@ export function cashPlan(now = new Date()) {
   return { month: k, at: today, items, later, perHead: G.perHead };
 }
 
+export const LINKED_FROM = '2026-10-26';
 function monthRows(now) {
   const rows = [];
   for (const [k, m] of Object.entries(monthStats(now))) {
@@ -455,7 +456,8 @@ function monthRows(now) {
     if (old && MONTH_KEYS.every(f => old[f] === m[f]) && JSON.stringify(old.src ?? null) === JSON.stringify(m.src ?? null)) continue;
     rows.push({ ...(old || { id, kind: 'monthsum', month: k }), ...m });
   }
-  const open = awaitingPayment(now), st = { open: open.reduce((s, e) => s + (priceOf(e) || 0), 0), openSessions: open.length };
+  // Only from the day the two apps were linked (1405/08/04): older unpaid sessions are settled history, not money ahead.
+  const open = awaitingPayment(now).filter(e => e.date >= LINKED_FROM), st = { open: open.reduce((s, e) => s + (priceOf(e) || 0), 0), openSessions: open.length };
   // For «حساب من»: what each client owes (held, unpaid sessions) and which packages are about to need renewing,
   // with the next package's value at today's price for the group's size.
   const by = new Map();
