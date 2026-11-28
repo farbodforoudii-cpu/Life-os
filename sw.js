@@ -1,6 +1,6 @@
 // Offline-first service worker: app shell is cached; bump VERSION on every release.
 // Every app on this site shares one Cache Storage: each app only ever touches caches with its own prefix.
-const PREFIX = 'lifeos-', VERSION = PREFIX + 'v33', LEGACY = ['v32'];
+const PREFIX = 'lifeos-', VERSION = PREFIX + 'v34', LEGACY = ['v32'];
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/store.js', 'js/model.js', 'js/sync.js', 'js/config.js', 'js/jalali.js',
